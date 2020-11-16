@@ -409,6 +409,7 @@ cache_char2policy(char c)		/* replacement policy as a char */
   case 'l': return LRU;
   case 'r': return Random;
   case 'f': return FIFO;
+  case 'a': return Adaptive;
   default: fatal("bogus replacement policy, `%c'", c);
   }
 }
@@ -427,6 +428,7 @@ cache_config(struct cache_t *cp,	/* cache instance */
 	  cp->policy == LRU ? "LRU"
 	  : cp->policy == Random ? "Random"
 	  : cp->policy == FIFO ? "FIFO"
+	  : cp->policy == Adaptive ? "ADAPTIVE"
 	  : (abort(), ""));
 }
 

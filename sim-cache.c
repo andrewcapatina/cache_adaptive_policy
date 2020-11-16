@@ -81,6 +81,8 @@
 /* current implementation: LRU, random, adaptive. */
 /* Policies: A, B, adaptive. Always keep adaptive. */
 enum cache_policy_adap{LRU_ADAP, RAND_ADAP, ADAP};
+/* Boolean states needed for program. */ 
+enum boolean{False, True};
 
 /* simulated registers */
 static struct regs_t regs;
@@ -107,6 +109,7 @@ static unsigned int il1_global_history = 0;
 static unsigned int il1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int il1_global_ready = 0;
+static unsigned short is_adaptive_il1 = False;
 
 /* level 1 instruction cache */
 static struct cache_t *cache_il2 = NULL;
@@ -121,6 +124,7 @@ static unsigned int il2_global_history = 0;
 static unsigned int il2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int il2_global_ready = 0;
+static unsigned short is_adaptive_il2 = False;
 
 /* level 1 data cache, entry level data cache */
 static struct cache_t *cache_dl1 = NULL;
@@ -135,6 +139,7 @@ static unsigned int dl1_global_history = 0;
 static unsigned int dl1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int dl1_global_ready = 0;
+static unsigned short is_adaptive_dl1 = False;
 
 
 /* level 2 data cache */
@@ -150,6 +155,7 @@ static unsigned int dl2_global_history = 0;
 static unsigned int dl2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int dl2_global_ready = 0;
+static unsigned short is_adaptive_dl2 = False;
 
 /* instruction TLB */
 static struct cache_t *itlb = NULL;
@@ -172,6 +178,19 @@ static struct stat_stat_t *pcstat_sdists[MAX_PCSTAT_VARS];
       : ((STAT)->sc == sc_counter					\
 	 ? *((STAT)->variant.for_counter.var)				\
 	 : (panic("bad stat class"), 0))))
+
+/* dummy block miss handler function */
+/* Policy A/B of adaptive don't need to access upper levels. */
+static unsigned int			/* latency of block access */
+dummy_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
+	      md_addr_t baddr,		/* block address to access */
+	      int bsize,		/* size of block to access */
+	      struct cache_blk_t *blk,	/* ptr to block in upper level */
+	      tick_t now)		/* time of access */
+{
+      /* It's a dummy access, nothing to look for. */
+      return /* access latency, ignored */1;
+}
 
 /* l1 data cache l1 block miss handler function */
 static unsigned int			/* latency of block access */
@@ -397,16 +416,58 @@ sim_check_options(struct opt_odb_t *odb,	/* options database */
       if (strcmp(cache_dl2_opt, "none"))
 	fatal("the l1 data cache must defined if the l2 cache is defined");
       cache_dl2 = NULL;
+      
+      /* Set adaptive caches to null. */ 
+      cache_dl1_adap[LRU_ADAP] = NULL;
+      cache_dl1_adap[RAND_ADAP] = NULL;
+      cache_dl1_adap[ADAP] = NULL;
+      
+      cache_dl2_adap[LRU_ADAP] = NULL;
+      cache_dl2_adap[RAND_ADAP] = NULL;
+      cache_dl2_adap[ADAP] = NULL;
     }
   else /* dl1 is defined */
     {
       if (sscanf(cache_dl1_opt, "%[^:]:%d:%d:%d:%c",
 		 name, &nsets, &bsize, &assoc, &c) != 5)
 	fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
-      cache_dl1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+	
+      /* Check if the policy is adaptive, it requires a different data structure. */
+      if (cache_char2policy(c) == Adaptive) {
+        is_adaptive_dl1 = True;		// Set variable indicating if adaptive is being used.
+        
+        // Initialize the LRU tag array for adaptive.
+        cache_dl1_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dummy_access_fn, /* hit latency */1); 
+        // Initialize the Randon tag array for adaptive.
+        cache_dl1_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, Random,
+			                        dummy_access_fn, /* hit latency */1); 
+        // Initialize the adaptive cache. 
+        // Doesn't matter what replacement policy is initialized. 
+        cache_dl1_adap[ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dl1_access_fn, /* hit latency */1); 
+			               
+        // Initialize the local history buffer.
+        dl1_local_history[LRU_ADAP] = 0x00000000;
+        dl1_local_history[RAND_ADAP] = 0x00000000;
+        // Initialize the global history buffer.
+        dl1_global_history = 0x00000000;        
+        // Initialize the local history READY buffers. 
+        dl1_local_ready[LRU_ADAP] = 0x00000000;
+        dl1_local_ready[RAND_ADAP] = 0x00000000;
+        // Initialize the global history READY buffer.
+        dl1_global_ready = 0x00000000;
+        
+      
+      } else {
+        cache_dl1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
 			       /* usize */0, assoc, cache_char2policy(c),
 			       dl1_access_fn, /* hit latency */1);
 
+      }
       /* is the level 2 D-cache defined? */
       if (!mystricmp(cache_dl2_opt, "none"))
 	cache_dl2 = NULL;
