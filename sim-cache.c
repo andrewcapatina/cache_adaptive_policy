@@ -109,6 +109,7 @@ static unsigned int il1_global_history = 0;
 static unsigned int il1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int il1_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_il1 = False;
 
 /* level 1 instruction cache */
@@ -124,6 +125,7 @@ static unsigned int il2_global_history = 0;
 static unsigned int il2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int il2_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_il2 = False;
 
 /* level 1 data cache, entry level data cache */
@@ -139,6 +141,7 @@ static unsigned int dl1_global_history = 0;
 static unsigned int dl1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int dl1_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_dl1 = False;
 
 
@@ -155,6 +158,7 @@ static unsigned int dl2_global_history = 0;
 static unsigned int dl2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
 static unsigned int dl2_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_dl2 = False;
 
 /* instruction TLB */
@@ -404,24 +408,24 @@ void
 sim_check_options(struct opt_odb_t *odb,	/* options database */
 		  int argc, char **argv)	/* command line arguments */
 {
-  char name[128], c;
+  char name[128], c, d;
   int nsets, bsize, assoc;
 
   /* use a level 1 D-cache? */
   if (!mystricmp(cache_dl1_opt, "none"))
     {
       cache_dl1 = NULL;
+      /* Set adaptive caches to null. */ 
+      cache_dl1_adap[LRU_ADAP] = NULL;
+      cache_dl1_adap[RAND_ADAP] = NULL;
+      cache_dl1_adap[ADAP] = NULL;
 
       /* the level 2 D-cache cannot be defined */
       if (strcmp(cache_dl2_opt, "none"))
 	fatal("the l1 data cache must defined if the l2 cache is defined");
       cache_dl2 = NULL;
       
-      /* Set adaptive caches to null. */ 
-      cache_dl1_adap[LRU_ADAP] = NULL;
-      cache_dl1_adap[RAND_ADAP] = NULL;
-      cache_dl1_adap[ADAP] = NULL;
-      
+      /* Set adaptive caches to null. */
       cache_dl2_adap[LRU_ADAP] = NULL;
       cache_dl2_adap[RAND_ADAP] = NULL;
       cache_dl2_adap[ADAP] = NULL;
@@ -469,17 +473,57 @@ sim_check_options(struct opt_odb_t *odb,	/* options database */
 
       }
       /* is the level 2 D-cache defined? */
-      if (!mystricmp(cache_dl2_opt, "none"))
-	cache_dl2 = NULL;
+      if (!mystricmp(cache_dl2_opt, "none")) {
+	cache_dl2 = NULL;      
+        /* Set adaptive caches to null. */ 
+        cache_dl2_adap[LRU_ADAP] = NULL;
+        cache_dl2_adap[RAND_ADAP] = NULL;
+        cache_dl2_adap[ADAP] = NULL;
+      }
       else
 	{
 	  if (sscanf(cache_dl2_opt, "%[^:]:%d:%d:%d:%c",
 		     name, &nsets, &bsize, &assoc, &c) != 5)
 	    fatal("bad l2 D-cache parms: "
 		  "<name>:<nsets>:<bsize>:<assoc>:<repl>");
-	  cache_dl2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
-				   /* usize */0, assoc, cache_char2policy(c),
-				   dl2_access_fn, /* hit latency */1);
+         /* Check if the policy is adaptive, it requires a different data structure. */
+         if (cache_char2policy(c) == Adaptive) {
+            is_adaptive_dl2 = True;		// Set variable indicating if adaptive is being used.
+        
+            // Initialize the LRU tag array for adaptive.
+            cache_dl2_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dummy_access_fn, /* hit latency */1); 
+            // Initialize the Randon tag array for adaptive.
+            cache_dl2_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, Random,
+			                        dummy_access_fn, /* hit latency */1); 
+            // Initialize the adaptive cache. 
+            // Doesn't matter what replacement policy is initialized. 
+            cache_dl2_adap[ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dl2_access_fn, /* hit latency */1); 
+			               
+            // Initialize the local history buffer.
+            dl2_local_history[LRU_ADAP] = 0x00000000;
+            dl2_local_history[RAND_ADAP] = 0x00000000;
+            // Initialize the global history buffer.
+            dl2_global_history = 0x00000000;        
+            // Initialize the local history READY buffers. 
+            dl2_local_ready[LRU_ADAP] = 0x00000000;
+            dl2_local_ready[RAND_ADAP] = 0x00000000;
+            // Initialize the global history READY buffer.
+            dl2_global_ready = 0x00000000;
+        
+      
+        } else {
+           cache_dl2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			       /* usize */0, assoc, cache_char2policy(c),
+			       dl2_access_fn, /* hit latency */1);
+
+        }
+
+
 	}
     }
 
@@ -487,51 +531,183 @@ sim_check_options(struct opt_odb_t *odb,	/* options database */
   if (!mystricmp(cache_il1_opt, "none"))
     {
       cache_il1 = NULL;
+      
+      /* Set adaptive caches to null. */ 
+      cache_il1_adap[LRU_ADAP] = NULL;
+      cache_il1_adap[RAND_ADAP] = NULL;
+      cache_il1_adap[ADAP] = NULL;
 
       /* the level 2 I-cache cannot be defined */
       if (strcmp(cache_il2_opt, "none"))
 	fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+   
+      /* Set adaptive caches to null. */ 
+      cache_il2_adap[LRU_ADAP] = NULL;
+      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[ADAP] = NULL;
+       
     }
   else if (!mystricmp(cache_il1_opt, "dl1"))
     {
-      if (!cache_dl1)
-	fatal("I-cache l1 cannot access D-cache l1 as it's undefined");
-      cache_il1 = cache_dl1;
+      // Get the replacement policies of DL1 and IL1 cache.
+      if (sscanf(cache_dl1_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &d) != 5)
+	fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+      if (sscanf(cache_il1_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &c) != 5)
+	fatal("bad l1 I-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
 
+      // Assign the caches based on their replacement policies. Adaptive uses a different data structure.
+      if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) != Adaptive ) {
+        if (!cache_dl1)
+	  fatal("I-cache l1 cannot access D-cache l1 as it's undefined");
+        cache_il1 = cache_dl1;
+      } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) != Adaptive ){
+        if (!cache_dl1)
+	  fatal("I-cache l1 cannot access D-cache l1 as it's undefined");
+      	 cache_il1_adap[ADAP] = cache_dl1;
+      } else if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) == Adaptive ){
+        if (!cache_dl1_adap[ADAP])
+	  fatal("I-cache l1 cannot access D-cache l1 as it's undefined");        
+        cache_il1 = cache_dl1_adap[ADAP];
+      } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) == Adaptive ){
+        if (!cache_dl1_adap[ADAP])
+	  fatal("I-cache l1 cannot access D-cache l1 as it's undefined");        
+        cache_il1_adap[ADAP] = cache_dl1_adap[ADAP];
+      }      
       /* the level 2 I-cache cannot be defined */
       if (strcmp(cache_il2_opt, "none"))
 	fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+      /* Set adaptive caches to null. */ 
+      cache_il2_adap[LRU_ADAP] = NULL;
+      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[ADAP] = NULL;
+
     }
   else if (!mystricmp(cache_il1_opt, "dl2"))
     {
-      if (!cache_dl2)
-	fatal("I-cache l1 cannot access D-cache l2 as it's undefined");
-      cache_il1 = cache_dl2;
+      // Get the replacement policies of DL2 and IL1 cache.
+      if (sscanf(cache_dl2_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &d) != 5)
+	fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+      if (sscanf(cache_il1_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &c) != 5)
+	fatal("bad l1 I-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+
+      // Assign the caches based on their replacement policies. Adaptive uses a different data structure.
+      if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) != Adaptive ) {
+        if (!cache_dl2)
+	  fatal("I-cache l1 cannot access D-cache l2 as it's undefined");      
+        cache_il1 = cache_dl2;
+      } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) != Adaptive ){
+        if (!cache_dl2)
+	  fatal("I-cache l1 cannot access D-cache l2 as it's undefined");      
+      	 cache_il1_adap[ADAP] = cache_dl2;
+      } else if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) == Adaptive ){
+        if (!cache_dl2_adap[ADAP])
+	  fatal("I-cache l1 cannot access D-cache l2 as it's undefined");            
+        cache_il1 = cache_dl2_adap[ADAP];
+      } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) == Adaptive ){
+        if (!cache_dl2_adap[ADAP])
+	  fatal("I-cache l1 cannot access D-cache l2 as it's undefined");            
+        cache_il1_adap[ADAP] = cache_dl2_adap[ADAP];
+      }
 
       /* the level 2 I-cache cannot be defined */
       if (strcmp(cache_il2_opt, "none"))
 	fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+      /* Set adaptive caches to null. */ 
+      cache_il2_adap[LRU_ADAP] = NULL;
+      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[ADAP] = NULL;
+
     }
   else /* il1 is defined */
     {
       if (sscanf(cache_il1_opt, "%[^:]:%d:%d:%d:%c",
 		 name, &nsets, &bsize, &assoc, &c) != 5)
 	fatal("bad l1 I-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
-      cache_il1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+
+      /* Check if the policy is adaptive, it requires a different data structure. */
+      if (cache_char2policy(c) == Adaptive) {
+        is_adaptive_il1 = True;		// Set variable indicating if adaptive is being used.
+        
+        // Initialize the LRU tag array for adaptive.
+        cache_il1_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dummy_access_fn, /* hit latency */1); 
+        // Initialize the Randon tag array for adaptive.
+        cache_il1_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, Random,
+			                        dummy_access_fn, /* hit latency */1); 
+        // Initialize the adaptive cache. 
+        // Doesn't matter what replacement policy is initialized. 
+        cache_il1_adap[ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+		                        /* usize */0, assoc, LRU,
+		                        il1_access_fn, /* hit latency */1); 
+			               
+        // Initialize the local history buffer.
+        il1_local_history[LRU_ADAP] = 0x00000000;
+        il1_local_history[RAND_ADAP] = 0x00000000;
+        // Initialize the global history buffer.
+        il1_global_history = 0x00000000;        
+        // Initialize the local history READY buffers. 
+        il1_local_ready[LRU_ADAP] = 0x00000000;
+        il1_local_ready[RAND_ADAP] = 0x00000000;
+        // Initialize the global history READY buffer.
+        il1_global_ready = 0x00000000;
+        
+
+      } else {
+        cache_il1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
 			       /* usize */0, assoc, cache_char2policy(c),
 			       il1_access_fn, /* hit latency */1);
+      }
+
 
       /* is the level 2 D-cache defined? */
-      if (!mystricmp(cache_il2_opt, "none"))
-	cache_il2 = NULL;
+      if (!mystricmp(cache_il2_opt, "none")) {
+	cache_il2 = NULL;      
+	/* Set adaptive caches to null. */ 
+        cache_il2_adap[LRU_ADAP] = NULL;
+        cache_il2_adap[RAND_ADAP] = NULL;
+        cache_il2_adap[ADAP] = NULL;
+      }  
       else if (!mystricmp(cache_il2_opt, "dl2"))
 	{
-	  if (!cache_dl2)
-	    fatal("I-cache l2 cannot access D-cache l2 as it's undefined");
-	  cache_il2 = cache_dl2;
+         // Get the replacement policies of DL2 and IL1 cache.
+         if (sscanf(cache_dl2_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &d) != 5)
+	    fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+         if (sscanf(cache_il2_opt, "%[^:]:%d:%d:%d:%c",
+		 name, &nsets, &bsize, &assoc, &c) != 5)  
+	    fatal("bad l1 I-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+
+         // Assign the caches based on their replacement policies. Adaptive uses a different data structure.
+         if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) != Adaptive ) {
+	   if (!cache_dl2)
+	     fatal("I-cache l2 cannot access D-cache l2 as it's undefined");         
+           cache_il2 = cache_dl2;
+         } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) != Adaptive ){
+	   if (!cache_dl2)
+	     fatal("I-cache l2 cannot access D-cache l2 as it's undefined");         
+
+      	   cache_il2_adap[ADAP] = cache_dl2;
+         } else if ( cache_char2policy(c) != Adaptive && cache_char2policy(d) == Adaptive ){
+	   if (!cache_dl2_adap[ADAP])
+	     fatal("I-cache l2 cannot access D-cache l2 as it's undefined");         
+
+           cache_il2 = cache_dl2_adap[ADAP];
+         } else if ( cache_char2policy(c) == Adaptive && cache_char2policy(d) == Adaptive ){
+	   if (!cache_dl2_adap[ADAP])
+	     fatal("I-cache l2 cannot access D-cache l2 as it's undefined");         
+           
+           cache_il2_adap[ADAP] = cache_dl2_adap[ADAP];
+         }
+
 	}
       else
 	{
@@ -539,9 +715,44 @@ sim_check_options(struct opt_odb_t *odb,	/* options database */
 		     name, &nsets, &bsize, &assoc, &c) != 5)
 	    fatal("bad l2 I-cache parms: "
 		  "<name>:<nsets>:<bsize>:<assoc>:<repl>");
-	  cache_il2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
-				   /* usize */0, assoc, cache_char2policy(c),
-				   il2_access_fn, /* hit latency */1);
+		  
+         /* Check if the policy is adaptive, it requires a different data structure. */
+         if (cache_char2policy(c) == Adaptive) {
+           is_adaptive_il2 = True;		// Set variable indicating if adaptive is being used.
+        
+           // Initialize the LRU tag array for adaptive.
+           cache_il2_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LRU,
+			                        dummy_access_fn, /* hit latency */1); 
+           // Initialize the Randon tag array for adaptive.
+           cache_il2_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, Random,
+			                        dummy_access_fn, /* hit latency */1); 
+           // Initialize the adaptive cache. 
+           // Doesn't matter what replacement policy is initialized. 
+           cache_il2_adap[ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+		                        /* usize */0, assoc, LRU,
+		                        il2_access_fn, /* hit latency */1); 
+			               
+           // Initialize the local history buffer.
+           il2_local_history[LRU_ADAP] = 0x00000000;
+           il2_local_history[RAND_ADAP] = 0x00000000;
+           // Initialize the global history buffer.
+           il2_global_history = 0x00000000;        
+           // Initialize the local history READY buffers. 
+           il2_local_ready[LRU_ADAP] = 0x00000000;
+           il2_local_ready[RAND_ADAP] = 0x00000000;
+           // Initialize the global history READY buffer.
+           il2_global_ready = 0x00000000;
+
+      } else {
+        cache_il2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+			       /* usize */0, assoc, cache_char2policy(c),
+			       il2_access_fn, /* hit latency */1);
+      }
+	
+	
+	
 	}
     }
 
@@ -657,6 +868,16 @@ sim_reg_stats(struct stat_sdb_t *sdb)	/* stats database */
     cache_reg_stats(itlb, sdb);
   if (dtlb)
     cache_reg_stats(dtlb, sdb);
+
+  /* register adaptive caches only if available. */    
+  if(cache_il1_adap[ADAP])
+      cache_reg_stats(cache_il1_adap[ADAP], sdb);
+  if(cache_il2_adap[ADAP])
+      cache_reg_stats(cache_il2_adap[ADAP], sdb);
+  if(cache_dl1_adap[ADAP])
+      cache_reg_stats(cache_dl1_adap[ADAP], sdb);
+  if(cache_dl2_adap[ADAP])
+      cache_reg_stats(cache_dl2_adap[ADAP], sdb);
 
   for (i=0; i<pcstat_nelt; i++)
     {
