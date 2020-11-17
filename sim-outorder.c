@@ -382,14 +382,14 @@ static struct cache_t *cache_il1 = NULL;
 /* Data structure for adaptive cache. */
 static struct cache_t *cache_il1_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
 /* local history buffers */
-static unsigned int il1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long il1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history buffer. */ 
-static unsigned int il1_global_history = 0;
+static unsigned long il1_global_history = 0;
 /* local history READY buffers */
 /* For policy A and B. */
-static unsigned int il1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long il1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
-static unsigned int il1_global_ready = 0;
+static unsigned long il1_global_ready = 0;
 /* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_il1 = False;
 
@@ -398,14 +398,14 @@ static struct cache_t *cache_il2 = NULL;
 /* Data structure for adaptive cache. */
 static struct cache_t *cache_il2_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
 /* local history buffers */
-static unsigned int il2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long il2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history buffer. */ 
-static unsigned int il2_global_history = 0;
+static unsigned long il2_global_history = 0;
 /* local history READY buffers */
 /* For policy A and B. */
-static unsigned int il2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long il2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
-static unsigned int il2_global_ready = 0;
+static unsigned long il2_global_ready = 0;
 /* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_il2 = False;
 
@@ -414,14 +414,14 @@ static struct cache_t *cache_dl1 = NULL;
 /* Data structure for adaptive cache. */
 static struct cache_t *cache_dl1_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
 /* local history buffers */
-static unsigned int dl1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long dl1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history buffer. */ 
-static unsigned int dl1_global_history = 0;
+static unsigned long dl1_global_history = 0;
 /* local history READY buffers */
 /* For policy A and B. */
-static unsigned int dl1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long dl1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
-static unsigned int dl1_global_ready = 0;
+static unsigned long dl1_global_ready = 0;
 /* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_dl1 = False;
 
@@ -431,14 +431,14 @@ static struct cache_t *cache_dl2 = NULL;
 /* Data structure for adaptive cache. */
 static struct cache_t *cache_dl2_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
 /* local history buffers */
-static unsigned int dl2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long dl2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history buffer. */ 
-static unsigned int dl2_global_history = 0;
+static unsigned long dl2_global_history = 0;
 /* local history READY buffers */
 /* For policy A and B. */
-static unsigned int dl2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+static unsigned long dl2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
 /* global history READY buffer. */ 
-static unsigned int dl2_global_ready = 0;
+static unsigned long dl2_global_ready = 0;
 /* Indicate if adaptive policy set for this cache. */
 static unsigned short is_adaptive_dl2 = False;
 
@@ -483,6 +483,26 @@ mem_access_latency(int blk_sz)		/* block size accessed */
 	  (/* remainder chunk latency */mem_lat[1] * (chunks - 1)));
 }
 
+/* Function to count the number of 0s in a buffer. */
+static int
+count_buffer_zeros(unsigned long to_count)
+{
+	int count = 0;		// count for number of zeros.
+	
+	// Loop over 32 bits.
+	for(int i = 0; i < 32; i++)
+	{
+		unsigned long val = to_count & 0x00000001; // Mask everything besides LSB.
+		if(val == 0)	// See if it's zero.
+		{
+			count = count + 1;
+		}
+		to_count = to_count >> 1; // shift to the right since we bitwise AND the LSB. 
+	}
+	
+	return count;
+	
+}
 
 /* dummy block miss handler function */
 /* Policy A/B of adaptive don't need to access upper levels. */
@@ -1081,11 +1101,18 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
   if (!mystricmp(cache_dl1_opt, "none"))
     {
       cache_dl1 = NULL;
+      cache_dl1_adap[LRU_ADAP] = NULL;
+      cache_dl1_adap[RAND_ADAP] = NULL;
+      cache_dl1_adap[ADAP] = NULL;
 
       /* the level 2 D-cache cannot be defined */
       if (strcmp(cache_dl2_opt, "none"))
 	fatal("the l1 data cache must defined if the l2 cache is defined");
       cache_dl2 = NULL;
+      cache_dl2_adap[LRU_ADAP] = NULL;
+      cache_dl2_adap[RAND_ADAP] = NULL;
+      cache_dl2_adap[ADAP] = NULL;
+
     }
   else /* dl1 is defined */
     {
@@ -2521,7 +2548,7 @@ ruu_commit(void)
 		      if (lat > cache_dl1_lat)
 			events |= PEV_CACHEMISS;
 		    }
-
+		    
 		  /* all loads and stores must to access D-TLB */
 		  if (dtlb)
 		    {
@@ -3067,6 +3094,183 @@ ruu_issue(void)
 				  if (load_lat > cache_dl1_lat)
 				    events |= PEV_CACHEMISS;
 				}
+	                     // Check if the adaptive cache structure was created.
+			      else if(cache_dl1_adap[ADAP] && valid_addr)
+			      {
+		    	  	counter_t miss_pre_access_a = 0;	// Total misses before access for policy A.
+		    		counter_t miss_pre_access_b = 0;	// Total misses before access for policy B.
+		    	
+		    	        // Check the misses for policy A and B before access.
+		    		miss_pre_access_a = cache_dl1_adap[LRU_ADAP]->misses;
+			    	miss_pre_access_b = cache_dl1_adap[RAND_ADAP]->misses;
+
+				// Access the cache of policy A.
+			    	cache_access(cache_dl1_adap[LRU_ADAP], Read,
+					 	(rs->addr & ~3), NULL, 4,
+					 	sim_cycle, NULL, NULL);
+		 		// Access the cache of policy B. 
+			    	cache_access(cache_dl1_adap[RAND_ADAP], Read,
+					 	(rs->addr & ~3), NULL, 4,
+					 	sim_cycle, NULL, NULL);	
+					
+				// Update the local history ready buffer for policy A if needed.
+				if(dl1_local_ready[LRU_ADAP] != 0xFFFFFFFF)
+				{
+					// Shift the buffer because it's not full.
+					dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] << 1;
+					// Insert 1 to LSB, maintain the value. 
+					dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] | 0x00000001;
+				}
+				// Update the local history ready buffer for policy B if needed.
+				if(dl1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+				{
+					// Shift the buffer because it's not full.
+					dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] << 1;
+					// Insert 1 to LSB, maintain the value. 
+					dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] | 0x00000001;
+				}				 
+			 	// Check if a miss has occurred for policy A.
+			 	// Update the local history buffer for policy A.
+			 	if(cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a)
+			 	{
+			 		// This case means there was a hit. Shift a 0 to LSB.
+			 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] << 1;
+			 		
+			 	} else 
+			 	{
+			 		// This case means there was a miss. Shift a 1 to LSB.
+			 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] << 1;
+			 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] | 0x00000001;
+			 				 	
+			 	}					 
+			 	// Check if a miss has occurred for policy B.
+			 	// Update the local history buffer for policy B.
+			 	if(cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+			 	{
+			 		// This case means there was a hit. Shift a 0 to LSB.
+			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+			 		
+			 	} else 
+			 	{
+			 		// This case means there was a miss. Shift a 1 to LSB.
+			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] | 0x00000001;
+			 				 	
+			 	}					 
+				
+				// Need to choose which policy the adaptive will use based on history buffers.
+				if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+				{
+					// Since both policies hit just choose policy A. 
+					cache_dl1_adap[ADAP]->policy = LRU;
+					// Shift policy A bit into the global history register. It's 0.
+					dl1_global_history = dl1_global_history << 1;
+ 					// Access the adaptive cache. 
+			    		load_lat = cache_access(cache_dl1_adap[ADAP], Read,
+					 		(rs->addr & ~3), NULL, 4,
+					 		sim_cycle, NULL, NULL);	
+					// Register miss event based on latency for the adaptive cache.
+					if (load_lat > cache_dl1_lat)
+					  events |= PEV_CACHEMISS;				
+				} else 
+				{	
+					// This case means there is a miss and voting must be done. 
+					// Implement prediction algorithm if ready buffers full.
+					if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+					{
+						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+						{
+							if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
+							{
+								// Choose policy B. 
+								cache_dl1_adap[ADAP]->policy = Random;
+								// Shift policy A bit into the global history register. It's zero. 
+								dl1_global_history = dl1_global_history << 1;
+								// Insert a one into the LSB.
+								dl1_global_history = dl1_global_history | 0x00000001;			
+							} else	// Policy A has lots of hits, use A instead.
+							{
+								// Choose policy A.
+								cache_dl1_adap[ADAP]->policy = LRU;
+								// Shift policy A bit into the global history register. It's zero. 
+								dl1_global_history = dl1_global_history << 1;							
+							}
+							
+		 					// Access the adaptive cache. 
+					    		load_lat = cache_access(cache_dl1_adap[ADAP], Read,
+								 		(rs->addr & ~3), NULL, 4,
+								 		sim_cycle, NULL, NULL);	
+							// Register miss event based on latency for the adaptive cache.
+							if (load_lat > cache_dl1_lat)
+							  events |= PEV_CACHEMISS;	
+						
+						} else	// Policy B has more local history hits. 
+						{
+							if(count_buffer_zeros(dl1_global_history) < 20) // If fraction of history is towards B, go with policy B.
+							{
+								// Choose policy B. 
+								cache_dl1_adap[ADAP]->policy = Random;
+								// Shift policy A bit into the global history register. It's zero. 
+								dl1_global_history = dl1_global_history << 1;
+								// Insert a one into the LSB.
+								dl1_global_history = dl1_global_history | 0x00000001;			
+							} else	// Policy A has lots of hits, use A instead.
+							{
+								// Choose policy A.
+								cache_dl1_adap[ADAP]->policy = LRU;
+								// Shift policy A bit into the global history register. It's zero. 
+								dl1_global_history = dl1_global_history << 1;							
+							}
+						
+						
+		 					// Access the adaptive cache. 
+					    		load_lat = cache_access(cache_dl1_adap[ADAP], Read,
+								 		(rs->addr & ~3), NULL, 4,
+								 		sim_cycle, NULL, NULL);	
+							// Register miss event based on latency for the adaptive cache.
+							if (load_lat > cache_dl1_lat)
+							  events |= PEV_CACHEMISS;	
+						}
+						
+						
+					} else 
+					{
+						// This means the buffers are not full. 
+						// Compare the local histories. 
+						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+						{
+							// Choose policy A. A <= B 
+							cache_dl1_adap[ADAP]->policy = LRU;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;
+						
+						} else 
+						{
+							// Choose policy B. A <= B 
+							cache_dl1_adap[ADAP]->policy = Random;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;
+							// Insert a one into the LSB.
+							dl1_global_history = dl1_global_history | 0x00000001;					
+						}
+						// Update the global READY buffer.
+						dl1_global_ready = dl1_global_ready << 1;
+						// Insert 1 to LSB.
+						dl1_global_ready = dl1_global_ready | 0x00000001;
+	 					// Access the adaptive cache. 
+				    		load_lat = cache_access(cache_dl1_adap[ADAP], Read,
+							 		(rs->addr & ~3), NULL, 4,
+							 		sim_cycle, NULL, NULL);	
+						// Register miss event based on latency for the adaptive cache.
+						if (load_lat > cache_dl1_lat)
+						  events |= PEV_CACHEMISS;						
+					
+					}
+				
+				}			    	
+			    				      
+			      
+			      }
 			      else
 				{
 				  /* no caches defined, just use op latency */
