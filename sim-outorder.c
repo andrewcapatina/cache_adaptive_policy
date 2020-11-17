@@ -367,17 +367,81 @@ static int pred_perfect = FALSE;
 static char *bpred_spec_opt;
 static enum { spec_ID, spec_WB, spec_CT } bpred_spec_update;
 
+/* Maximum number of caches used by adaptive policy. */
+#define MAX_CACHES_ADAP 3
+
+/* adaptive cache policies. */
+/* current implementation: LRU, random, adaptive. */
+/* Policies: A, B, adaptive. Always keep adaptive. */
+enum cache_policy_adap{LRU_ADAP, RAND_ADAP, ADAP};
+/* Boolean states needed for program. */ 
+enum boolean{False, True};
+
 /* level 1 instruction cache, entry level instruction cache */
-static struct cache_t *cache_il1;
+static struct cache_t *cache_il1 = NULL;
+/* Data structure for adaptive cache. */
+static struct cache_t *cache_il1_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
+/* local history buffers */
+static unsigned int il1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history buffer. */ 
+static unsigned int il1_global_history = 0;
+/* local history READY buffers */
+/* For policy A and B. */
+static unsigned int il1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history READY buffer. */ 
+static unsigned int il1_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
+static unsigned short is_adaptive_il1 = False;
 
 /* level 1 instruction cache */
-static struct cache_t *cache_il2;
+static struct cache_t *cache_il2 = NULL;
+/* Data structure for adaptive cache. */
+static struct cache_t *cache_il2_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
+/* local history buffers */
+static unsigned int il2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history buffer. */ 
+static unsigned int il2_global_history = 0;
+/* local history READY buffers */
+/* For policy A and B. */
+static unsigned int il2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history READY buffer. */ 
+static unsigned int il2_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
+static unsigned short is_adaptive_il2 = False;
 
 /* level 1 data cache, entry level data cache */
-static struct cache_t *cache_dl1;
+static struct cache_t *cache_dl1 = NULL;
+/* Data structure for adaptive cache. */
+static struct cache_t *cache_dl1_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
+/* local history buffers */
+static unsigned int dl1_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history buffer. */ 
+static unsigned int dl1_global_history = 0;
+/* local history READY buffers */
+/* For policy A and B. */
+static unsigned int dl1_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history READY buffer. */ 
+static unsigned int dl1_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
+static unsigned short is_adaptive_dl1 = False;
+
 
 /* level 2 data cache */
-static struct cache_t *cache_dl2;
+static struct cache_t *cache_dl2 = NULL;
+/* Data structure for adaptive cache. */
+static struct cache_t *cache_dl2_adap[MAX_CACHES_ADAP] = {NULL, NULL, NULL};
+/* local history buffers */
+static unsigned int dl2_local_history[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history buffer. */ 
+static unsigned int dl2_global_history = 0;
+/* local history READY buffers */
+/* For policy A and B. */
+static unsigned int dl2_local_ready[MAX_CACHES_ADAP-1] = {0, 0};
+/* global history READY buffer. */ 
+static unsigned int dl2_global_ready = 0;
+/* Indicate if adaptive policy set for this cache. */
+static unsigned short is_adaptive_dl2 = False;
+
 
 /* instruction TLB */
 static struct cache_t *itlb;
