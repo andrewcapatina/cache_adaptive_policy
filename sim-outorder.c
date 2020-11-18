@@ -545,6 +545,193 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
 	  return 0;
 	}
     }
+  else if(cache_dl2_adap[ADAP]) 
+  {
+        counter_t miss_pre_access_a = 0;	// Total misses before access for policy A.
+        counter_t miss_pre_access_b = 0;	// Total misses before access for policy B.
+        
+        // Check the misses for policy A and B before access.
+        miss_pre_access_a = cache_dl2_adap[LRU_ADAP]->misses;
+        miss_pre_access_b = cache_dl2_adap[RAND_ADAP]->misses;
+
+        // Access the cache of policy A.
+     	cache_access(cache_dl2_adap[LRU_ADAP], cmd, baddr, NULL, bsize,
+			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
+        // Access the cache of policy B. 
+     	cache_access(cache_dl2_adap[RAND_ADAP], cmd, baddr, NULL, bsize,
+			 /* now */now, /* pudata */NULL, /* repl addr */NULL);	 		
+                        
+        // Update the local history ready buffer for policy A if needed.
+        if(dl2_local_ready[LRU_ADAP] != 0xFFFFFFFF)
+        {
+                // Shift the buffer because it's not full.
+                dl2_local_ready[LRU_ADAP] = dl2_local_ready[LRU_ADAP] << 1;
+                // Insert 1 to LSB, maintain the value. 
+                dl2_local_ready[LRU_ADAP] = dl2_local_ready[LRU_ADAP] | 0x00000001;
+        }
+        // Update the local history ready buffer for policy B if needed.
+        if(dl2_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+        {
+                // Shift the buffer because it's not full.
+                dl2_local_ready[RAND_ADAP] = dl2_local_ready[RAND_ADAP] << 1;
+                // Insert 1 to LSB, maintain the value. 
+                dl2_local_ready[RAND_ADAP] = dl2_local_ready[RAND_ADAP] | 0x00000001;
+        }				 
+        // Check if a miss has occurred for policy A.
+        // Update the local history buffer for policy A.
+        if(cache_dl2_adap[LRU_ADAP]->misses == miss_pre_access_a)
+        {
+                // This case means there was a hit. Shift a 0 to LSB.
+                dl2_local_history[LRU_ADAP] = dl2_local_history[LRU_ADAP] << 1;
+                        
+        } else 
+        {
+                // This case means there was a miss. Shift a 1 to LSB.
+                dl2_local_history[LRU_ADAP] = dl2_local_history[LRU_ADAP] << 1;
+                dl2_local_history[LRU_ADAP] = dl2_local_history[LRU_ADAP] | 0x00000001;
+                                                
+        }					 
+        // Check if a miss has occurred for policy B.
+        // Update the local history buffer for policy B.
+        if(cache_dl2_adap[RAND_ADAP]->misses == miss_pre_access_b)
+        {
+                // This case means there was a hit. Shift a 0 to LSB.
+                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] << 1;
+                        
+        } else 
+        {
+                // This case means there was a miss. Shift a 1 to LSB.
+                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] << 1;
+                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] | 0x00000001;
+                                                
+        }					 
+                
+        // Need to choose which policy the adaptive will use based on history buffers.
+        if((cache_dl2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl2_adap[RAND_ADAP]->misses == miss_pre_access_b))
+        {
+                // Since both policies hit just choose policy A. 
+                cache_dl2_adap[ADAP]->policy = LRU;
+                // Shift policy A bit into the global history register. It's 0.
+                dl2_global_history = dl2_global_history << 1;
+      		/* access next level of data cache hierarchy */
+      		lat = cache_access(cache_dl2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
+      		if (cmd == Read)
+			return lat;
+      		else
+		{
+	  		/* FIXME: unlimited write buffers */
+	  		return 0;
+		}			
+        } else 
+        {	
+                // This case means there is a miss and voting must be done. 
+                // Implement prediction algorithm if ready buffers full.
+                if(dl2_global_ready == 0xFFFFFFFF && dl2_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl2_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                {
+                        if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[RAND_ADAP]))
+                        {
+                                if(count_buffer_zeros(dl2_global_history) < 12) // If fraction of history is towards B, go with policy B.
+                                {
+                                        // Choose policy B. 
+                                        cache_dl2_adap[ADAP]->policy = Random;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        dl2_global_history = dl2_global_history << 1;
+                                        // Insert a one into the LSB.
+                                        dl2_global_history = dl2_global_history | 0x00000001;			
+                                } else	// Policy A has lots of hits, use A instead.
+                                {
+                                        // Choose policy A.
+                                        cache_dl2_adap[ADAP]->policy = LRU;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        dl2_global_history = dl2_global_history << 1;							
+                                }
+                                        
+                                // Access the adaptive cache. 
+				/* access next level of data cache hierarchy */
+      				lat = cache_access(cache_dl2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 	/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      				else
+				{
+	  				/* FIXME: unlimited write buffers */
+	  				return 0;
+				}	
+				                  
+                        } else	// Policy B has more local history hits. 
+                        {
+                                if(count_buffer_zeros(dl2_global_history) < 20) // If fraction of history is towards B, go with policy B.
+                                {
+                                        // Choose policy B. 
+                                        cache_dl2_adap[ADAP]->policy = Random;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        dl2_global_history = dl2_global_history << 1;
+                                        // Insert a one into the LSB.
+                                        dl2_global_history = dl2_global_history | 0x00000001;			
+                                } else	// Policy A has lots of hits, use A instead.
+                                {
+                                        // Choose policy A.
+                                        cache_dl2_adap[ADAP]->policy = LRU;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        dl2_global_history = dl2_global_history << 1;							
+                                }
+                                
+                                // Access the adaptive cache. 
+      				/* access next level of data cache hierarchy */
+      				lat = cache_access(cache_dl2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 			/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      				else
+				{
+	  				/* FIXME: unlimited write buffers */
+	  				return 0;
+				}		
+                        }
+                                
+                                
+                } else 
+                    {
+                            // This means the buffers are not full. 
+                            // Compare the local histories. 
+                            if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[RAND_ADAP]))
+                            {
+                                    // Choose policy A. A <= B 
+                                    cache_dl2_adap[ADAP]->policy = LRU;
+                                    // Shift policy A bit into the global history register. It's zero. 
+                                    dl2_global_history = dl2_global_history << 1;
+                                    
+                            } else 
+                            {
+                                    // Choose policy B. A <= B 
+                                    cache_dl2_adap[ADAP]->policy = Random;
+                                    // Shift policy A bit into the global history register. It's zero. 
+                                    dl2_global_history = dl2_global_history << 1;
+                                    // Insert a one into the LSB.
+                                    dl2_global_history = dl2_global_history | 0x00000001;					
+                            }
+                            // Update the global READY buffer.
+                            dl2_global_ready = dl2_global_ready << 1;
+                            // Insert 1 to LSB.
+                            dl2_global_ready = dl2_global_ready | 0x00000001;
+                            // Access the adaptive cache. 
+      				/* access next level of data cache hierarchy */
+      				lat = cache_access(cache_dl2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 			/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      				else
+				{
+	  				/* FIXME: unlimited write buffers */
+	  				return 0;
+				}							
+                            
+                    }
+                    
+            }			    	
+
+  }
   else
     {
       /* access main memory */
@@ -596,7 +783,188 @@ if (cache_il2)
       else
 	panic("writes to instruction memory not supported");
     }
-  else
+  else if(cache_il2_adap[ADAP]) 
+  {
+
+        counter_t miss_pre_access_a = 0;	// Total misses before access for policy A.
+        counter_t miss_pre_access_b = 0;	// Total misses before access for policy B.
+                
+        // Check the misses for policy A and B before access.
+        miss_pre_access_a = cache_il2_adap[LRU_ADAP]->misses;
+        miss_pre_access_b = cache_il2_adap[RAND_ADAP]->misses;
+
+        // Access the cache of policy A.
+      /* access next level of inst cache hierarchy */
+      cache_access(cache_il2_adap[LRU_ADAP], cmd, baddr, NULL, bsize,
+		 /* now */now, /* pudata */NULL, /* repl addr */NULL);
+  	 	
+        // Access the cache of policy B. 
+      cache_access(cache_il2_adap[RAND_ADAP], cmd, baddr, NULL, bsize,
+		 /* now */now, /* pudata */NULL, /* repl addr */NULL);		
+                                
+        // Update the local history ready buffer for policy A if needed.
+        if(il2_local_ready[LRU_ADAP] != 0xFFFFFFFF)
+        {
+                // Shift the buffer because it's not full.
+                il2_local_ready[LRU_ADAP] = il2_local_ready[LRU_ADAP] << 1;
+                // Insert 1 to LSB, maintain the value. 
+                il2_local_ready[LRU_ADAP] = il2_local_ready[LRU_ADAP] | 0x00000001;
+        }
+        // Update the local history ready buffer for policy B if needed.
+        if(il2_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+        {
+                // Shift the buffer because it's not full.
+                il2_local_ready[RAND_ADAP] = il2_local_ready[RAND_ADAP] << 1;
+                // Insert 1 to LSB, maintain the value. 
+                il2_local_ready[RAND_ADAP] = il2_local_ready[RAND_ADAP] | 0x00000001;
+        }				 
+        // Check if a miss has occurred for policy A.
+        // Update the local history buffer for policy A.
+        if(cache_il2_adap[LRU_ADAP]->misses == miss_pre_access_a)
+        {
+                // This case means there was a hit. Shift a 0 to LSB.
+                il2_local_history[LRU_ADAP] = il2_local_history[LRU_ADAP] << 1;
+                
+        } else 
+        {
+                // This case means there was a miss. Shift a 1 to LSB.
+                il2_local_history[LRU_ADAP] = il2_local_history[LRU_ADAP] << 1;
+                il2_local_history[LRU_ADAP] = il2_local_history[LRU_ADAP] | 0x00000001;
+                                        
+        }					 
+        // Check if a miss has occurred for policy B.
+        // Update the local history buffer for policy B.
+        if(cache_il2_adap[RAND_ADAP]->misses == miss_pre_access_b)
+        {
+                // This case means there was a hit. Shift a 0 to LSB.
+                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] << 1;
+                
+        } else 
+        {
+                // This case means there was a miss. Shift a 1 to LSB.
+                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] << 1;
+                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] | 0x00000001;
+                                        
+        }					 
+        
+        // Need to choose which policy the adaptive will use based on history buffers.
+        if((cache_il2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il2_adap[RAND_ADAP]->misses == miss_pre_access_b))
+        {
+                // Since both policies hit just choose policy A. 
+                cache_il2_adap[ADAP]->policy = LRU;
+                // Shift policy A bit into the global history register. It's 0.
+                il2_global_history = il2_global_history << 1;
+                // Access the adaptive cache. 
+      		/* access next level of inst cache hierarchy */
+      		lat = cache_access(cache_il2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 		/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      		if (cmd == Read)
+			return lat;
+      		else
+			panic("writes to instruction memory not supported");			
+        } else 
+        {	
+                // This case means there is a miss and voting must be done. 
+                // Implement prediction algorithm if ready buffers full.
+                if(il2_global_ready == 0xFFFFFFFF && il2_local_ready[LRU_ADAP] == 0xFFFFFFFF && il2_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                {
+                        if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[RAND_ADAP]))
+                        {
+                                if(count_buffer_zeros(il2_global_history) < 12) // If fraction of history is towards B, go with policy B.
+                                {
+                                        // Choose policy B. 
+                                        cache_il2_adap[ADAP]->policy = Random;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il2_global_history = il2_global_history << 1;
+                                        // Insert a one into the LSB.
+                                        il2_global_history = il2_global_history | 0x00000001;			
+                                } else	// Policy A has lots of hits, use A instead.
+                                {
+                                        // Choose policy A.
+                                        cache_il2_adap[ADAP]->policy = LRU;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il2_global_history = il2_global_history << 1;							
+                                }
+                                // Access the adaptive cache. 
+      				/* access next level of inst cache hierarchy */
+      				lat = cache_access(cache_il2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 				/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      		else
+			panic("writes to instruction memory not supported");	
+                        
+                        } else	// Policy B has more local history hits. 
+                        {
+                                if(count_buffer_zeros(il2_global_history) < 20) // If fraction of history is towards B, go with policy B.
+                                {
+                                        // Choose policy B. 
+                                        cache_il2_adap[ADAP]->policy = Random;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il2_global_history = il2_global_history << 1;
+                                        // Insert a one into the LSB.
+                                        il2_global_history = il2_global_history | 0x00000001;			
+                                } else	// Policy A has lots of hits, use A instead.
+                                {
+                                        // Choose policy A.
+                                        cache_il2_adap[ADAP]->policy = LRU;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il2_global_history = il2_global_history << 1;							
+                                }
+                        
+                        
+                                // Access the adaptive cache. 
+      				/* access next level of inst cache hierarchy */
+      				lat = cache_access(cache_il2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 		/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      				else
+					panic("writes to instruction memory not supported");	
+        		}
+                        
+                        
+                } else 
+                    {
+                            // This means the buffers are not full. 
+                            // Compare the local histories. 
+                            if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[RAND_ADAP]))
+                            {
+                                    // Choose policy A. A <= B 
+                                    cache_il2_adap[ADAP]->policy = LRU;
+                                    // Shift policy A bit into the global history register. It's zero. 
+                                    il2_global_history = il2_global_history << 1;
+                            
+                            } else 
+                            {
+                                    // Choose policy B. A <= B 
+                                    cache_il2_adap[ADAP]->policy = Random;
+                                    // Shift policy A bit into the global history register. It's zero. 
+                                    il2_global_history = il2_global_history << 1;
+                                    // Insert a one into the LSB.
+                                    il2_global_history = il2_global_history | 0x00000001;					
+                            }
+                            // Update the global READY buffer.
+                            il2_global_ready = il2_global_ready << 1;
+                            // Insert 1 to LSB.
+                            il2_global_ready = il2_global_ready | 0x00000001;
+                            // Access the adaptive cache. 
+      				/* access next level of inst cache hierarchy */
+      				lat = cache_access(cache_il2_adap[ADAP], cmd, baddr, NULL, bsize,
+			 		/* now */now, /* pudata */NULL, /* repl addr */NULL);
+      				if (cmd == Read)
+					return lat;
+      				else
+					panic("writes to instruction memory not supported");						
+                    	
+                    }
+            
+            }			    	
+                                          
+
+ 
+  }
+  else if (!cache_il2 && !cache_il2_adap[ADAP])
     {
       /* access main memory */
       if (cmd == Read)
@@ -2548,6 +2916,177 @@ ruu_commit(void)
 		      if (lat > cache_dl1_lat)
 			events |= PEV_CACHEMISS;
 		    }
+     		    // Check if the adaptive cache structure was created.
+		    else if(cache_dl1_adap[ADAP])
+		    {
+	    	  	counter_t miss_pre_access_a = 0;	// Total misses before access for policy A.
+	    		counter_t miss_pre_access_b = 0;	// Total misses before access for policy B.
+		    	
+	    	        // Check the misses for policy A and B before access.
+	    		miss_pre_access_a = cache_dl1_adap[LRU_ADAP]->misses;
+		    	miss_pre_access_b = cache_dl1_adap[RAND_ADAP]->misses;
+
+			// Access the cache of policy A.
+			cache_access(cache_dl1_adap[LRU_ADAP], Write, (LSQ[LSQ_head].addr&~3),
+				     NULL, 4, sim_cycle, NULL, NULL);
+	 		// Access the cache of policy B. 
+			cache_access(cache_dl1_adap[RAND_ADAP], Write, (LSQ[LSQ_head].addr&~3),
+				     NULL, 4, sim_cycle, NULL, NULL);	 		
+					
+			// Update the local history ready buffer for policy A if needed.
+			if(dl1_local_ready[LRU_ADAP] != 0xFFFFFFFF)
+			{
+				// Shift the buffer because it's not full.
+				dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] << 1;
+				// Insert 1 to LSB, maintain the value. 
+				dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] | 0x00000001;
+			}
+			// Update the local history ready buffer for policy B if needed.
+			if(dl1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+			{
+				// Shift the buffer because it's not full.
+				dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] << 1;
+				// Insert 1 to LSB, maintain the value. 
+				dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] | 0x00000001;
+			}				 
+		 	// Check if a miss has occurred for policy A.
+		 	// Update the local history buffer for policy A.
+		 	if(cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a)
+		 	{
+		 		// This case means there was a hit. Shift a 0 to LSB.
+		 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] << 1;
+			 		
+		 	} else 
+		 	{
+		 		// This case means there was a miss. Shift a 1 to LSB.
+		 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] << 1;
+		 		dl1_local_history[LRU_ADAP] = dl1_local_history[LRU_ADAP] | 0x00000001;
+			 				 	
+		 	}					 
+		 	// Check if a miss has occurred for policy B.
+		 	// Update the local history buffer for policy B.
+		 	if(cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+		 	{
+		 		// This case means there was a hit. Shift a 0 to LSB.
+		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+			 		
+		 	} else 
+		 	{
+		 		// This case means there was a miss. Shift a 1 to LSB.
+		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] | 0x00000001;
+			 				 	
+		 	}					 
+				
+			// Need to choose which policy the adaptive will use based on history buffers.
+			if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+			{
+				// Since both policies hit just choose policy A. 
+				cache_dl1_adap[ADAP]->policy = LRU;
+				// Shift policy A bit into the global history register. It's 0.
+				dl1_global_history = dl1_global_history << 1;
+				// Access the adaptive cache. 
+				lat = cache_access(cache_dl1_adap[ADAP], Write, (LSQ[LSQ_head].addr&~3),
+				     NULL, 4, sim_cycle, NULL, NULL);			 			
+				// Register miss event based on latency for the adaptive cache.
+		      		if (lat > cache_dl1_lat)
+					events |= PEV_CACHEMISS;			
+			} else 
+			{	
+				// This case means there is a miss and voting must be done. 
+				// Implement prediction algorithm if ready buffers full.
+				if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+				{
+					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+					{
+						if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
+						{
+							// Choose policy B. 
+							cache_dl1_adap[ADAP]->policy = Random;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;
+							// Insert a one into the LSB.
+							dl1_global_history = dl1_global_history | 0x00000001;			
+						} else	// Policy A has lots of hits, use A instead.
+						{
+							// Choose policy A.
+							cache_dl1_adap[ADAP]->policy = LRU;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;							
+						}
+							
+	 					// Access the adaptive cache. 
+						lat = cache_access(cache_dl1_adap[ADAP], Write, (LSQ[LSQ_head].addr&~3),
+				     			NULL, 4, sim_cycle, NULL, NULL);		
+						// Register miss event based on latency for the adaptive cache.
+		      				if (lat > cache_dl1_lat)
+							events |= PEV_CACHEMISS;	
+						
+					} else	// Policy B has more local history hits. 
+					{
+						if(count_buffer_zeros(dl1_global_history) < 20) // If fraction of history is towards B, go with policy B.
+						{
+							// Choose policy B. 
+							cache_dl1_adap[ADAP]->policy = Random;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;
+							// Insert a one into the LSB.
+							dl1_global_history = dl1_global_history | 0x00000001;			
+						} else	// Policy A has lots of hits, use A instead.
+						{
+							// Choose policy A.
+							cache_dl1_adap[ADAP]->policy = LRU;
+							// Shift policy A bit into the global history register. It's zero. 
+							dl1_global_history = dl1_global_history << 1;							
+						}
+						
+	 					// Access the adaptive cache. 
+						lat = cache_access(cache_dl1_adap[ADAP], Write, (LSQ[LSQ_head].addr&~3),
+				     			NULL, 4, sim_cycle, NULL, NULL);		
+						// Register miss event based on latency for the adaptive cache.
+		      				if (lat > cache_dl1_lat)
+							events |= PEV_CACHEMISS;	
+					}
+						
+						
+				} else 
+				{
+					// This means the buffers are not full. 
+					// Compare the local histories. 
+					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+					{
+						// Choose policy A. A <= B 
+						cache_dl1_adap[ADAP]->policy = LRU;
+						// Shift policy A bit into the global history register. It's zero. 
+						dl1_global_history = dl1_global_history << 1;
+						
+					} else 
+					{
+						// Choose policy B. A <= B 
+						cache_dl1_adap[ADAP]->policy = Random;
+						// Shift policy A bit into the global history register. It's zero. 
+						dl1_global_history = dl1_global_history << 1;
+						// Insert a one into the LSB.
+						dl1_global_history = dl1_global_history | 0x00000001;					
+					}
+					// Update the global READY buffer.
+					dl1_global_ready = dl1_global_ready << 1;
+					// Insert 1 to LSB.
+					dl1_global_ready = dl1_global_ready | 0x00000001;
+ 					// Access the adaptive cache. 
+					lat = cache_access(cache_dl1_adap[ADAP], Write, (LSQ[LSQ_head].addr&~3),
+			     			NULL, 4, sim_cycle, NULL, NULL);			
+					// Register miss event based on latency for the adaptive cache.
+	      				if (lat > cache_dl1_lat)
+						events |= PEV_CACHEMISS;							
+					
+				}
+				
+			}			    	
+			    				      
+			      
+		      }
+		    
 		    
 		  /* all loads and stores must to access D-TLB */
 		  if (dtlb)
@@ -4771,6 +5310,185 @@ ruu_fetch(void)
 	      if (lat > cache_il1_lat)
 		last_inst_missed = TRUE;
 	    }
+     	    // Check if the adaptive cache structure was created.
+           else if(cache_il1_adap[ADAP])
+	    {
+    	  	counter_t miss_pre_access_a = 0;	// Total misses before access for policy A.
+	    	counter_t miss_pre_access_b = 0;	// Total misses before access for policy B.
+		    	
+    	        // Check the misses for policy A and B before access.
+    		miss_pre_access_a = cache_il1_adap[LRU_ADAP]->misses;
+	    	miss_pre_access_b = cache_il1_adap[RAND_ADAP]->misses;
+
+		// Access the cache of policy A.
+		cache_access(cache_il1_adap[LRU_ADAP], Read, IACOMPRESS(fetch_regs_PC),
+			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+			     NULL, NULL);			 	
+ 		// Access the cache of policy B. 
+		cache_access(cache_il1_adap[RAND_ADAP], Read, IACOMPRESS(fetch_regs_PC),
+			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+			     NULL, NULL);	 		
+					
+		// Update the local history ready buffer for policy A if needed.
+		if(il1_local_ready[LRU_ADAP] != 0xFFFFFFFF)
+		{
+			// Shift the buffer because it's not full.
+			il1_local_ready[LRU_ADAP] = il1_local_ready[LRU_ADAP] << 1;
+			// Insert 1 to LSB, maintain the value. 
+			il1_local_ready[LRU_ADAP] = il1_local_ready[LRU_ADAP] | 0x00000001;
+		}
+		// Update the local history ready buffer for policy B if needed.
+		if(il1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+                {
+                        // Shift the buffer because it's not full.
+                        il1_local_ready[RAND_ADAP] = il1_local_ready[RAND_ADAP] << 1;
+                        // Insert 1 to LSB, maintain the value. 
+                        il1_local_ready[RAND_ADAP] = il1_local_ready[RAND_ADAP] | 0x00000001;
+                }				 
+                // Check if a miss has occurred for policy A.
+                // Update the local history buffer for policy A.
+                if(cache_il1_adap[LRU_ADAP]->misses == miss_pre_access_a)
+                {
+                        // This case means there was a hit. Shift a 0 to LSB.
+                        il1_local_history[LRU_ADAP] = il1_local_history[LRU_ADAP] << 1;
+                        
+                } else 
+                {
+                        // This case means there was a miss. Shift a 1 to LSB.
+                        il1_local_history[LRU_ADAP] = il1_local_history[LRU_ADAP] << 1;
+                        il1_local_history[LRU_ADAP] = il1_local_history[LRU_ADAP] | 0x00000001;
+                                                
+                }					 
+                // Check if a miss has occurred for policy B.
+                // Update the local history buffer for policy B.
+                if(cache_il1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+                {
+                        // This case means there was a hit. Shift a 0 to LSB.
+                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] << 1;
+                        
+                } else 
+                {
+                        // This case means there was a miss. Shift a 1 to LSB.
+                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] << 1;
+                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] | 0x00000001;
+                                                
+                }					 
+                
+                // Need to choose which policy the adaptive will use based on history buffers.
+                if((cache_il1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+                {
+                        // Since both policies hit just choose policy A. 
+                        cache_il1_adap[ADAP]->policy = LRU;
+                        // Shift policy A bit into the global history register. It's 0.
+                        il1_global_history = il1_global_history << 1;
+                        // Access the adaptive cache. 
+	      		lat =
+			cache_access(cache_il1_adap[ADAP], Read, IACOMPRESS(fetch_regs_PC),
+			     		NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+			     		NULL, NULL);
+	      		if (lat > cache_il1_lat)
+				last_inst_missed = TRUE;				
+                } else 
+                {	
+                        // This case means there is a miss and voting must be done. 
+                        // Implement prediction algorithm if ready buffers full.
+                        if(il1_global_ready == 0xFFFFFFFF && il1_local_ready[LRU_ADAP] == 0xFFFFFFFF && il1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                        {
+                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[RAND_ADAP]))
+                                {
+                                        if(count_buffer_zeros(il1_global_history) < 12) // If fraction of history is towards B, go with policy B.
+                                        {
+                                                // Choose policy B. 
+                                                cache_il1_adap[ADAP]->policy = Random;
+                                                // Shift policy A bit into the global history register. It's zero. 
+                                                il1_global_history = il1_global_history << 1;
+                                                // Insert a one into the LSB.
+                                                il1_global_history = il1_global_history | 0x00000001;			
+                                        } else	// Policy A has lots of hits, use A instead.
+                                        {
+                                                // Choose policy A.
+                                                cache_il1_adap[ADAP]->policy = LRU;
+                                                // Shift policy A bit into the global history register. It's zero. 
+                                                il1_global_history = il1_global_history << 1;							
+                                        }
+                                        // Access the adaptive cache. 
+	      				lat =
+					cache_access(cache_il1_adap[ADAP], Read, IACOMPRESS(fetch_regs_PC),
+			     				NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+			     				NULL, NULL);
+	      				if (lat > cache_il1_lat)
+						last_inst_missed = TRUE;
+                                
+                                } else	// Policy B has more local history hits. 
+                                {
+                                        if(count_buffer_zeros(il1_global_history) < 20) // If fraction of history is towards B, go with policy B.
+                                        {
+                                                // Choose policy B. 
+                                                cache_il1_adap[ADAP]->policy = Random;
+                                                // Shift policy A bit into the global history register. It's zero. 
+                                                il1_global_history = il1_global_history << 1;
+                                                // Insert a one into the LSB.
+                                                il1_global_history = il1_global_history | 0x00000001;			
+                                        } else	// Policy A has lots of hits, use A instead.
+                                        {
+                                                // Choose policy A.
+                                                cache_il1_adap[ADAP]->policy = LRU;
+                                                // Shift policy A bit into the global history register. It's zero. 
+                                                il1_global_history = il1_global_history << 1;							
+                                        }
+                                
+                                
+                                        // Access the adaptive cache. 
+	      				lat =
+					cache_access(cache_il1_adap[ADAP], Read, IACOMPRESS(fetch_regs_PC),
+			     				NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+			     				NULL, NULL);
+	      				if (lat > cache_il1_lat)
+						last_inst_missed = TRUE;
+                                }
+                                
+                                
+                        } else 
+                        {
+                                // This means the buffers are not full. 
+                                // Compare the local histories. 
+                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[RAND_ADAP]))
+                                {
+                                        // Choose policy A. A <= B 
+                                        cache_il1_adap[ADAP]->policy = LRU;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il1_global_history = il1_global_history << 1;
+                                
+                                } else 
+                                {
+                                        // Choose policy B. A <= B 
+                                        cache_il1_adap[ADAP]->policy = Random;
+                                        // Shift policy A bit into the global history register. It's zero. 
+                                        il1_global_history = il1_global_history << 1;
+                                        // Insert a one into the LSB.
+                                        il1_global_history = il1_global_history | 0x00000001;					
+                                }
+                                // Update the global READY buffer.
+                                il1_global_ready = il1_global_ready << 1;
+                                // Insert 1 to LSB.
+                                il1_global_ready = il1_global_ready | 0x00000001;
+                                // Access the adaptive cache. 
+      				lat =
+				cache_access(cache_il1_adap[ADAP], Read, IACOMPRESS(fetch_regs_PC),
+		     				NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
+		     				NULL, NULL);
+      				if (lat > cache_il1_lat)
+					last_inst_missed = TRUE;						
+                        
+                        }
+                
+                }			    	
+                                              
+              
+              }	    
+
+
+        
 
 	  if (itlb)
 	    {
