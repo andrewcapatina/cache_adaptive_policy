@@ -103,7 +103,8 @@ enum cache_policy {
   LRU,		/* replace least recently used block (perfect LRU) */
   Random,	/* replace a random block */
   FIFO,	/* replace the oldest block in the set */
-  Adaptive	/* Choose between competing replacement policies. */
+  Adaptive,	/* Choose between competing replacement policies. */
+  LFU		/* replace the least frequently used block. */
 };
 
 /* block status values */
@@ -118,6 +119,7 @@ struct cache_blk_t
   struct cache_blk_t *way_prev;	/* previous block in the order way chain */
   struct cache_blk_t *hash_next;/* next block in the hash bucket chain, only
 				   used in highly-associative caches */
+  unsigned long lfu_count;	/* Count for number of times block is used. */
   /* since hash table lists are typically small, there is no previous
      pointer, deletion requires a trip through the hash table bucket list */
   md_addr_t tag;		/* data block tag value */

@@ -377,6 +377,7 @@ cache_create(char *name,		/* name of the cache */
 	  blk = CACHE_BINDEX(cp, cp->data, bindex);
 	  bindex++;
 
+	  blk->lfu_count = 0;
 	  /* invalidate new cache block */
 	  blk->status = 0;
 	  blk->tag = 0;
@@ -410,6 +411,7 @@ cache_char2policy(char c)		/* replacement policy as a char */
   case 'r': return Random;
   case 'f': return FIFO;
   case 'a': return Adaptive;
+  case 'z': return LFU;
   default: fatal("bogus replacement policy, `%c'", c);
   }
 }
@@ -429,6 +431,7 @@ cache_config(struct cache_t *cp,	/* cache instance */
 	  : cp->policy == Random ? "Random"
 	  : cp->policy == FIFO ? "FIFO"
 	  : cp->policy == Adaptive ? "ADAPTIVE"
+	  : cp->policy == LFU ? "LFU"
 	  : (abort(), ""));
 }
 
@@ -581,8 +584,88 @@ cache_access(struct cache_t *cp,	/* cache to access */
     {
       int bindex = myrand() & (cp->assoc - 1);
       repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
+      fprintf(stderr, "address replaced: %p\n", (void*)repl);
+      break;
     }
-    break;
+  case LFU:
+    {
+       //fprintf(stderr, "sim: 1\n");
+       short flag = 0;		// Flag for setting a variable.
+	unsigned long lowest_count = 0;	// variable for containing lowest LFU count number.
+//	lowest_count = cp->sets[set].way_tail->lfu_count;
+
+/*
+       for(int i = 0; i < cp->assoc; ++i)	// Loop through each block within the set.
+       {
+       	struct cache_blk_t * block = CACHE_BINDEX(cp, cp->sets[set].blks, i);	// Get the cache block.
+       	//fprintf(stderr, "sim: 1\n");
+       	if(flag == 0)
+       	{
+       		lowest_count = block->lfu_count; // Store the first value found.
+       		flag = 1;
+       	}
+       	else 
+       	{
+       		if(lowest_count > block->lfu_count) // Looking for lowest count.
+       		{
+       			lowest_count = block->lfu_count;
+       		}
+       	}
+       	
+       	
+       }
+*/
+
+
+       struct cache_blk_t * set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+       struct cache_blk_t * current_ptr = set_tail;			// Current pointer for loop below.
+       while(current_ptr != NULL)
+       {
+       	if(flag == 0)
+       	{
+       		lowest_count = current_ptr->lfu_count; // Store the first value found.
+       		flag = 1;
+       	}
+       	else 
+       	{
+       		if(lowest_count > current_ptr->lfu_count) // Looking for lowest count.
+       		{
+       			lowest_count = current_ptr->lfu_count;
+       		}
+       	}
+       	
+       
+       	current_ptr = current_ptr->way_prev;
+       }
+
+       set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+       current_ptr = set_tail;			// Current pointer for loop below.
+       int flag2 = 0;
+       //fprintf(stderr, "sim: 2\n");
+       do 
+       {
+//       fprintf(stderr, "count: %lu \n", lowest_count);
+//       fprintf(stderr, "sim: 1\n");
+//       fprintf(stderr, "count: %lu \n", current_ptr->lfu_count);
+       	if(current_ptr->lfu_count == lowest_count) // Search for the lowest count.
+       	{
+//       	fprintf(stderr, "sim: 2\n");
+       		//fprintf(stderr, "address replaced: %p\n", (void*)current_ptr);
+       		//fprintf(stderr, "count: %lu \n", lowest_count);
+       		repl = current_ptr;	// Set the replacement block.
+			
+	   		update_way_list(&cp->sets[set], repl, Head);
+       		flag2 = 1;
+       	}
+       	current_ptr = current_ptr->way_prev; // Traverse the linked list. 
+       
+       } while (flag2 == 0);
+       if(!repl)
+         fatal("LFU replacement policy failed. variables repl null.");
+        
+       break;
+    }
+    
   default:
     panic("bogus replacement policy");
   }
@@ -621,6 +704,9 @@ cache_access(struct cache_t *cp,	/* cache to access */
 				   cp->bsize, repl, now+lat);
 	}
     }
+
+  // Reset the frequency counter. 
+  repl->lfu_count = 0;
 
   /* update block tags */
   repl->tag = tag;
@@ -671,11 +757,15 @@ cache_access(struct cache_t *cp,	/* cache to access */
     blk->status |= CACHE_BLK_DIRTY;
 
   /* if LRU replacement and this is not the first element of list, reorder */
-  if (blk->way_prev && cp->policy == LRU)
+  if ((blk->way_prev && cp->policy == LRU) || (blk->way_prev && cp->policy == LFU) )
     {
       /* move this block to head of the way (MRU) list */
       update_way_list(&cp->sets[set], blk, Head);
     }
+    
+    
+  /* Update the LFU count of the block. */
+  blk->lfu_count = blk->lfu_count + 1;
 
   /* tag is unchanged, so hash links (if they exist) are still valid */
 
@@ -704,6 +794,9 @@ cache_access(struct cache_t *cp,	/* cache to access */
   /* update dirty status */
   if (cmd == Write)
     blk->status |= CACHE_BLK_DIRTY;
+    
+  /* Update the LFU count of the block. */
+  blk->lfu_count = blk->lfu_count + 1;
 
   /* this block hit last, no change in the way list */
 
