@@ -642,7 +642,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
        current_ptr = set_tail;			// Current pointer for loop below.
        int flag2 = 0;
        //fprintf(stderr, "sim: 2\n");
-       do 
+       while(current_ptr != NULL)
        {
 //       fprintf(stderr, "count: %lu \n", lowest_count);
 //       fprintf(stderr, "sim: 1\n");
@@ -655,11 +655,10 @@ cache_access(struct cache_t *cp,	/* cache to access */
        		repl = current_ptr;	// Set the replacement block.
 			
 	   		update_way_list(&cp->sets[set], repl, Head);
-       		flag2 = 1;
        	}
        	current_ptr = current_ptr->way_prev; // Traverse the linked list. 
        
-       } while (flag2 == 0);
+       }
        if(!repl)
          fatal("LFU replacement policy failed. variables repl null.");
         
