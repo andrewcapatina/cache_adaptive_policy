@@ -373,7 +373,7 @@ static enum { spec_ID, spec_WB, spec_CT } bpred_spec_update;
 /* adaptive cache policies. */
 /* current implementation: LRU, random, adaptive. */
 /* Policies: A, B, adaptive. Always keep adaptive. */
-enum cache_policy_adap{LRU_ADAP, RAND_ADAP, ADAP};
+enum cache_policy_adap{LRU_ADAP, LFU_ADAP, ADAP};
 /* Boolean states needed for program. */ 
 enum boolean{False, True};
 
@@ -552,13 +552,13 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
         
         // Check the misses for policy A and B before access.
         miss_pre_access_a = cache_dl2_adap[LRU_ADAP]->misses;
-        miss_pre_access_b = cache_dl2_adap[RAND_ADAP]->misses;
+        miss_pre_access_b = cache_dl2_adap[LFU_ADAP]->misses;
 
         // Access the cache of policy A.
      	cache_access(cache_dl2_adap[LRU_ADAP], cmd, baddr, NULL, bsize,
 			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
         // Access the cache of policy B. 
-     	cache_access(cache_dl2_adap[RAND_ADAP], cmd, baddr, NULL, bsize,
+     	cache_access(cache_dl2_adap[LFU_ADAP], cmd, baddr, NULL, bsize,
 			 /* now */now, /* pudata */NULL, /* repl addr */NULL);	 		
                         
         // Update the local history ready buffer for policy A if needed.
@@ -570,12 +570,12 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
                 dl2_local_ready[LRU_ADAP] = dl2_local_ready[LRU_ADAP] | 0x00000001;
         }
         // Update the local history ready buffer for policy B if needed.
-        if(dl2_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+        if(dl2_local_ready[LFU_ADAP] != 0xFFFFFFFF)
         {
                 // Shift the buffer because it's not full.
-                dl2_local_ready[RAND_ADAP] = dl2_local_ready[RAND_ADAP] << 1;
+                dl2_local_ready[LFU_ADAP] = dl2_local_ready[LFU_ADAP] << 1;
                 // Insert 1 to LSB, maintain the value. 
-                dl2_local_ready[RAND_ADAP] = dl2_local_ready[RAND_ADAP] | 0x00000001;
+                dl2_local_ready[LFU_ADAP] = dl2_local_ready[LFU_ADAP] | 0x00000001;
         }				 
         // Check if a miss has occurred for policy A.
         // Update the local history buffer for policy A.
@@ -593,21 +593,21 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
         }					 
         // Check if a miss has occurred for policy B.
         // Update the local history buffer for policy B.
-        if(cache_dl2_adap[RAND_ADAP]->misses == miss_pre_access_b)
+        if(cache_dl2_adap[LFU_ADAP]->misses == miss_pre_access_b)
         {
                 // This case means there was a hit. Shift a 0 to LSB.
-                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] << 1;
+                dl2_local_history[LFU_ADAP] = dl2_local_history[LFU_ADAP] << 1;
                         
         } else 
         {
                 // This case means there was a miss. Shift a 1 to LSB.
-                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] << 1;
-                dl2_local_history[RAND_ADAP] = dl2_local_history[RAND_ADAP] | 0x00000001;
+                dl2_local_history[LFU_ADAP] = dl2_local_history[LFU_ADAP] << 1;
+                dl2_local_history[LFU_ADAP] = dl2_local_history[LFU_ADAP] | 0x00000001;
                                                 
         }					 
                 
         // Need to choose which policy the adaptive will use based on history buffers.
-        if((cache_dl2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl2_adap[RAND_ADAP]->misses == miss_pre_access_b))
+        if((cache_dl2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl2_adap[LFU_ADAP]->misses == miss_pre_access_b))
         {
                 // Since both policies hit just choose policy A. 
                 cache_dl2_adap[ADAP]->policy = LRU;
@@ -627,9 +627,9 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
         {	
                 // This case means there is a miss and voting must be done. 
                 // Implement prediction algorithm if ready buffers full.
-                if(dl2_global_ready == 0xFFFFFFFF && dl2_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl2_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                if(dl2_global_ready == 0xFFFFFFFF && dl2_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl2_local_ready[LFU_ADAP] == 0xFFFFFFFF) 
                 {
-                        if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[RAND_ADAP]))
+                        if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[LFU_ADAP]))
                         {
                                 if(count_buffer_zeros(dl2_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                 {
@@ -695,7 +695,7 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
                     {
                             // This means the buffers are not full. 
                             // Compare the local histories. 
-                            if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[RAND_ADAP]))
+                            if(count_buffer_zeros(dl2_local_history[LRU_ADAP]) >= count_buffer_zeros(dl2_local_history[LFU_ADAP]))
                             {
                                     // Choose policy A. A <= B 
                                     cache_dl2_adap[ADAP]->policy = LRU;
@@ -791,7 +791,7 @@ if (cache_il2)
                 
         // Check the misses for policy A and B before access.
         miss_pre_access_a = cache_il2_adap[LRU_ADAP]->misses;
-        miss_pre_access_b = cache_il2_adap[RAND_ADAP]->misses;
+        miss_pre_access_b = cache_il2_adap[LFU_ADAP]->misses;
 
         // Access the cache of policy A.
       /* access next level of inst cache hierarchy */
@@ -799,7 +799,7 @@ if (cache_il2)
 		 /* now */now, /* pudata */NULL, /* repl addr */NULL);
   	 	
         // Access the cache of policy B. 
-      cache_access(cache_il2_adap[RAND_ADAP], cmd, baddr, NULL, bsize,
+      cache_access(cache_il2_adap[LFU_ADAP], cmd, baddr, NULL, bsize,
 		 /* now */now, /* pudata */NULL, /* repl addr */NULL);		
                                 
         // Update the local history ready buffer for policy A if needed.
@@ -811,12 +811,12 @@ if (cache_il2)
                 il2_local_ready[LRU_ADAP] = il2_local_ready[LRU_ADAP] | 0x00000001;
         }
         // Update the local history ready buffer for policy B if needed.
-        if(il2_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+        if(il2_local_ready[LFU_ADAP] != 0xFFFFFFFF)
         {
                 // Shift the buffer because it's not full.
-                il2_local_ready[RAND_ADAP] = il2_local_ready[RAND_ADAP] << 1;
+                il2_local_ready[LFU_ADAP] = il2_local_ready[LFU_ADAP] << 1;
                 // Insert 1 to LSB, maintain the value. 
-                il2_local_ready[RAND_ADAP] = il2_local_ready[RAND_ADAP] | 0x00000001;
+                il2_local_ready[LFU_ADAP] = il2_local_ready[LFU_ADAP] | 0x00000001;
         }				 
         // Check if a miss has occurred for policy A.
         // Update the local history buffer for policy A.
@@ -834,21 +834,21 @@ if (cache_il2)
         }					 
         // Check if a miss has occurred for policy B.
         // Update the local history buffer for policy B.
-        if(cache_il2_adap[RAND_ADAP]->misses == miss_pre_access_b)
+        if(cache_il2_adap[LFU_ADAP]->misses == miss_pre_access_b)
         {
                 // This case means there was a hit. Shift a 0 to LSB.
-                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] << 1;
+                il2_local_history[LFU_ADAP] = il2_local_history[LFU_ADAP] << 1;
                 
         } else 
         {
                 // This case means there was a miss. Shift a 1 to LSB.
-                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] << 1;
-                il2_local_history[RAND_ADAP] = il2_local_history[RAND_ADAP] | 0x00000001;
+                il2_local_history[LFU_ADAP] = il2_local_history[LFU_ADAP] << 1;
+                il2_local_history[LFU_ADAP] = il2_local_history[LFU_ADAP] | 0x00000001;
                                         
         }					 
         
         // Need to choose which policy the adaptive will use based on history buffers.
-        if((cache_il2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il2_adap[RAND_ADAP]->misses == miss_pre_access_b))
+        if((cache_il2_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il2_adap[LFU_ADAP]->misses == miss_pre_access_b))
         {
                 // Since both policies hit just choose policy A. 
                 cache_il2_adap[ADAP]->policy = LRU;
@@ -866,9 +866,9 @@ if (cache_il2)
         {	
                 // This case means there is a miss and voting must be done. 
                 // Implement prediction algorithm if ready buffers full.
-                if(il2_global_ready == 0xFFFFFFFF && il2_local_ready[LRU_ADAP] == 0xFFFFFFFF && il2_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                if(il2_global_ready == 0xFFFFFFFF && il2_local_ready[LRU_ADAP] == 0xFFFFFFFF && il2_local_ready[LFU_ADAP] == 0xFFFFFFFF) 
                 {
-                        if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[RAND_ADAP]))
+                        if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[LFU_ADAP]))
                         {
                                 if(count_buffer_zeros(il2_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                 {
@@ -928,7 +928,7 @@ if (cache_il2)
                     {
                             // This means the buffers are not full. 
                             // Compare the local histories. 
-                            if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[RAND_ADAP]))
+                            if(count_buffer_zeros(il2_local_history[LRU_ADAP]) >= count_buffer_zeros(il2_local_history[LFU_ADAP]))
                             {
                                     // Choose policy A. A <= B 
                                     cache_il2_adap[ADAP]->policy = LRU;
@@ -1345,7 +1345,7 @@ void
 sim_check_options(struct opt_odb_t *odb,        /* options database */
 		  int argc, char **argv)        /* command line arguments */
 {
-  char name[128], c, d;
+  char name[128], c, d, name_adap[128];
   int nsets, bsize, assoc;
 
   if (fastfwd_count < 0 || fastfwd_count >= 2147483647)
@@ -1470,7 +1470,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
     {
       cache_dl1 = NULL;
       cache_dl1_adap[LRU_ADAP] = NULL;
-      cache_dl1_adap[RAND_ADAP] = NULL;
+      cache_dl1_adap[LFU_ADAP] = NULL;
       cache_dl1_adap[ADAP] = NULL;
 
       /* the level 2 D-cache cannot be defined */
@@ -1478,7 +1478,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	fatal("the l1 data cache must defined if the l2 cache is defined");
       cache_dl2 = NULL;
       cache_dl2_adap[LRU_ADAP] = NULL;
-      cache_dl2_adap[RAND_ADAP] = NULL;
+      cache_dl2_adap[LFU_ADAP] = NULL;
       cache_dl2_adap[ADAP] = NULL;
 
     }
@@ -1492,13 +1492,15 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (cache_char2policy(c) == Adaptive) {
         is_adaptive_dl1 = True;		// Set variable indicating if adaptive is being used.
         
+        strcpy(name_adap,"dl1_a");
         // Initialize the LRU tag array for adaptive.
-        cache_dl1_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+        cache_dl1_adap[LRU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
 			                        /* usize */0, assoc, LRU,
 			                        dummy_access_fn, /* hit latency */1); 
+	strcpy(name_adap,"dl1_b");
         // Initialize the Randon tag array for adaptive.
-        cache_dl1_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
-			                        /* usize */0, assoc, Random,
+        cache_dl1_adap[LFU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LFU,
 			                        dummy_access_fn, /* hit latency */1); 
         // Initialize the adaptive cache. 
         // Doesn't matter what replacement policy is initialized. 
@@ -1508,12 +1510,12 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 			               
         // Initialize the local history buffer.
         dl1_local_history[LRU_ADAP] = 0x00000000;
-        dl1_local_history[RAND_ADAP] = 0x00000000;
+        dl1_local_history[LFU_ADAP] = 0x00000000;
         // Initialize the global history buffer.
         dl1_global_history = 0x00000000;        
         // Initialize the local history READY buffers. 
         dl1_local_ready[LRU_ADAP] = 0x00000000;
-        dl1_local_ready[RAND_ADAP] = 0x00000000;
+        dl1_local_ready[LFU_ADAP] = 0x00000000;
         // Initialize the global history READY buffer.
         dl1_global_ready = 0x00000000;
         
@@ -1529,7 +1531,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	cache_dl2 = NULL;      
         /* Set adaptive caches to null. */ 
         cache_dl2_adap[LRU_ADAP] = NULL;
-        cache_dl2_adap[RAND_ADAP] = NULL;
+        cache_dl2_adap[LFU_ADAP] = NULL;
         cache_dl2_adap[ADAP] = NULL;
       }
       else
@@ -1542,13 +1544,15 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
          if (cache_char2policy(c) == Adaptive) {
             is_adaptive_dl2 = True;		// Set variable indicating if adaptive is being used.
         
+            strcpy(name_adap,"dl2_a");
             // Initialize the LRU tag array for adaptive.
-            cache_dl2_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+            cache_dl2_adap[LRU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
 			                        /* usize */0, assoc, LRU,
 			                        dummy_access_fn, /* hit latency */1); 
+	    strcpy(name_adap,"dl2_b");			                        
             // Initialize the Randon tag array for adaptive.
-            cache_dl2_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
-			                        /* usize */0, assoc, Random,
+            cache_dl2_adap[LFU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LFU,
 			                        dummy_access_fn, /* hit latency */1); 
             // Initialize the adaptive cache. 
             // Doesn't matter what replacement policy is initialized. 
@@ -1558,12 +1562,12 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 			               
             // Initialize the local history buffer.
             dl2_local_history[LRU_ADAP] = 0x00000000;
-            dl2_local_history[RAND_ADAP] = 0x00000000;
+            dl2_local_history[LFU_ADAP] = 0x00000000;
             // Initialize the global history buffer.
             dl2_global_history = 0x00000000;        
             // Initialize the local history READY buffers. 
             dl2_local_ready[LRU_ADAP] = 0x00000000;
-            dl2_local_ready[RAND_ADAP] = 0x00000000;
+            dl2_local_ready[LFU_ADAP] = 0x00000000;
             // Initialize the global history READY buffer.
             dl2_global_ready = 0x00000000;
         
@@ -1586,7 +1590,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       
       /* Set adaptive caches to null. */ 
       cache_il1_adap[LRU_ADAP] = NULL;
-      cache_il1_adap[RAND_ADAP] = NULL;
+      cache_il1_adap[LFU_ADAP] = NULL;
       cache_il1_adap[ADAP] = NULL;
 
       /* the level 2 I-cache cannot be defined */
@@ -1596,7 +1600,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
    
       /* Set adaptive caches to null. */ 
       cache_il2_adap[LRU_ADAP] = NULL;
-      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[LFU_ADAP] = NULL;
       cache_il2_adap[ADAP] = NULL;
        
     }
@@ -1625,7 +1629,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       cache_il2 = NULL;
       /* Set adaptive caches to null. */ 
       cache_il2_adap[LRU_ADAP] = NULL;
-      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[LFU_ADAP] = NULL;
       cache_il2_adap[ADAP] = NULL;
 
     }
@@ -1653,7 +1657,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       cache_il2 = NULL;
       /* Set adaptive caches to null. */ 
       cache_il2_adap[LRU_ADAP] = NULL;
-      cache_il2_adap[RAND_ADAP] = NULL;
+      cache_il2_adap[LFU_ADAP] = NULL;
       cache_il2_adap[ADAP] = NULL;
 
     }
@@ -1667,13 +1671,15 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (cache_char2policy(c) == Adaptive) {
         is_adaptive_il1 = True;		// Set variable indicating if adaptive is being used.
         
+        strcpy(name_adap,"il1_a");
         // Initialize the LRU tag array for adaptive.
-        cache_il1_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+        cache_il1_adap[LRU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
 			                        /* usize */0, assoc, LRU,
-			                        dummy_access_fn, /* hit latency */1); 
+			                        dummy_access_fn, /* hit latency */1);
+        strcpy(name_adap,"il1_b"); 
         // Initialize the Randon tag array for adaptive.
-        cache_il1_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
-			                        /* usize */0, assoc, Random,
+        cache_il1_adap[LFU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LFU,
 			                        dummy_access_fn, /* hit latency */1); 
         // Initialize the adaptive cache. 
         // Doesn't matter what replacement policy is initialized. 
@@ -1683,12 +1689,12 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 			               
         // Initialize the local history buffer.
         il1_local_history[LRU_ADAP] = 0x00000000;
-        il1_local_history[RAND_ADAP] = 0x00000000;
+        il1_local_history[LFU_ADAP] = 0x00000000;
         // Initialize the global history buffer.
         il1_global_history = 0x00000000;        
         // Initialize the local history READY buffers. 
         il1_local_ready[LRU_ADAP] = 0x00000000;
-        il1_local_ready[RAND_ADAP] = 0x00000000;
+        il1_local_ready[LFU_ADAP] = 0x00000000;
         // Initialize the global history READY buffer.
         il1_global_ready = 0x00000000;
         
@@ -1705,7 +1711,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	cache_il2 = NULL;      
 	/* Set adaptive caches to null. */ 
         cache_il2_adap[LRU_ADAP] = NULL;
-        cache_il2_adap[RAND_ADAP] = NULL;
+        cache_il2_adap[LFU_ADAP] = NULL;
         cache_il2_adap[ADAP] = NULL;
       }  
       else if (!mystricmp(cache_il2_opt, "dl2"))
@@ -1739,13 +1745,15 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
          if (cache_char2policy(c) == Adaptive) {
            is_adaptive_il2 = True;		// Set variable indicating if adaptive is being used.
         
+           strcpy(name_adap,"il2_a");
            // Initialize the LRU tag array for adaptive.
-           cache_il2_adap[LRU_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
+           cache_il2_adap[LRU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
 			                        /* usize */0, assoc, LRU,
 			                        dummy_access_fn, /* hit latency */1); 
+	   strcpy(name_adap,"il2_b");
            // Initialize the Randon tag array for adaptive.
-           cache_il2_adap[RAND_ADAP] = cache_create(name, nsets, bsize, /* balloc */FALSE,
-			                        /* usize */0, assoc, Random,
+           cache_il2_adap[LFU_ADAP] = cache_create(name_adap, nsets, bsize, /* balloc */FALSE,
+			                        /* usize */0, assoc, LFU,
 			                        dummy_access_fn, /* hit latency */1); 
            // Initialize the adaptive cache. 
            // Doesn't matter what replacement policy is initialized. 
@@ -1755,12 +1763,12 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 			               
            // Initialize the local history buffer.
            il2_local_history[LRU_ADAP] = 0x00000000;
-           il2_local_history[RAND_ADAP] = 0x00000000;
+           il2_local_history[LFU_ADAP] = 0x00000000;
            // Initialize the global history buffer.
            il2_global_history = 0x00000000;        
            // Initialize the local history READY buffers. 
            il2_local_ready[LRU_ADAP] = 0x00000000;
-           il2_local_ready[RAND_ADAP] = 0x00000000;
+           il2_local_ready[LFU_ADAP] = 0x00000000;
            // Initialize the global history READY buffer.
            il2_global_ready = 0x00000000;
 
@@ -1994,13 +2002,28 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
     cache_reg_stats(dtlb, sdb);
     
   /* register adaptive caches only if available. */    
-  /* Don't register the other tag arrays. */
+  if(cache_il1_adap[LRU_ADAP])
+      cache_reg_stats(cache_il1_adap[LRU_ADAP], sdb);
+  if(cache_il1_adap[LFU_ADAP])
+      cache_reg_stats(cache_il1_adap[LFU_ADAP], sdb);      
   if(cache_il1_adap[ADAP])
       cache_reg_stats(cache_il1_adap[ADAP], sdb);
+  if(cache_il2_adap[LRU_ADAP])
+      cache_reg_stats(cache_il2_adap[LRU_ADAP], sdb);
+  if(cache_il2_adap[LFU_ADAP])
+      cache_reg_stats(cache_il2_adap[LFU_ADAP], sdb);
   if(cache_il2_adap[ADAP])
       cache_reg_stats(cache_il2_adap[ADAP], sdb);
+  if(cache_dl1_adap[LRU_ADAP])
+      cache_reg_stats(cache_dl1_adap[LRU_ADAP], sdb);
+  if(cache_dl1_adap[LFU_ADAP])
+      cache_reg_stats(cache_dl1_adap[LFU_ADAP], sdb);
   if(cache_dl1_adap[ADAP])
       cache_reg_stats(cache_dl1_adap[ADAP], sdb);
+  if(cache_dl2_adap[LRU_ADAP])
+      cache_reg_stats(cache_dl2_adap[LRU_ADAP], sdb);
+  if(cache_dl2_adap[LFU_ADAP])
+      cache_reg_stats(cache_dl2_adap[LFU_ADAP], sdb);
   if(cache_dl2_adap[ADAP])
       cache_reg_stats(cache_dl2_adap[ADAP], sdb);
 
@@ -2890,13 +2913,13 @@ ruu_commit(void)
 		    	
 	    	        // Check the misses for policy A and B before access.
 	    		miss_pre_access_a = cache_dl1_adap[LRU_ADAP]->misses;
-		    	miss_pre_access_b = cache_dl1_adap[RAND_ADAP]->misses;
+		    	miss_pre_access_b = cache_dl1_adap[LFU_ADAP]->misses;
 
 			// Access the cache of policy A.
 			cache_access(cache_dl1_adap[LRU_ADAP], Write, (LSQ[LSQ_head].addr&~3),
 				     NULL, 4, sim_cycle, NULL, NULL);
 	 		// Access the cache of policy B. 
-			cache_access(cache_dl1_adap[RAND_ADAP], Write, (LSQ[LSQ_head].addr&~3),
+			cache_access(cache_dl1_adap[LFU_ADAP], Write, (LSQ[LSQ_head].addr&~3),
 				     NULL, 4, sim_cycle, NULL, NULL);	 		
 					
 			// Update the local history ready buffer for policy A if needed.
@@ -2908,12 +2931,12 @@ ruu_commit(void)
 				dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] | 0x00000001;
 			}
 			// Update the local history ready buffer for policy B if needed.
-			if(dl1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+			if(dl1_local_ready[LFU_ADAP] != 0xFFFFFFFF)
 			{
 				// Shift the buffer because it's not full.
-				dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] << 1;
+				dl1_local_ready[LFU_ADAP] = dl1_local_ready[LFU_ADAP] << 1;
 				// Insert 1 to LSB, maintain the value. 
-				dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] | 0x00000001;
+				dl1_local_ready[LFU_ADAP] = dl1_local_ready[LFU_ADAP] | 0x00000001;
 			}				 
 		 	// Check if a miss has occurred for policy A.
 		 	// Update the local history buffer for policy A.
@@ -2931,21 +2954,21 @@ ruu_commit(void)
 		 	}					 
 		 	// Check if a miss has occurred for policy B.
 		 	// Update the local history buffer for policy B.
-		 	if(cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+		 	if(cache_dl1_adap[LFU_ADAP]->misses == miss_pre_access_b)
 		 	{
 		 		// This case means there was a hit. Shift a 0 to LSB.
-		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+		 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] << 1;
 			 		
 		 	} else 
 		 	{
 		 		// This case means there was a miss. Shift a 1 to LSB.
-		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
-		 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] | 0x00000001;
+		 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] << 1;
+		 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] | 0x00000001;
 			 				 	
 		 	}					 
 				
 			// Need to choose which policy the adaptive will use based on history buffers.
-			if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+			if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[LFU_ADAP]->misses == miss_pre_access_b))
 			{
 				// Since both policies hit just choose policy A. 
 				cache_dl1_adap[ADAP]->policy = LRU;
@@ -2961,9 +2984,9 @@ ruu_commit(void)
 			{	
 				// This case means there is a miss and voting must be done. 
 				// Implement prediction algorithm if ready buffers full.
-				if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+				if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[LFU_ADAP] == 0xFFFFFFFF) 
 				{
-					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[LFU_ADAP]))
 					{
 						if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
 						{
@@ -3019,7 +3042,7 @@ ruu_commit(void)
 				{
 					// This means the buffers are not full. 
 					// Compare the local histories. 
-					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+					if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[LFU_ADAP]))
 					{
 						// Choose policy A. A <= B 
 						cache_dl1_adap[ADAP]->policy = LRU;
@@ -3607,14 +3630,14 @@ ruu_issue(void)
 		    	
 		    	        // Check the misses for policy A and B before access.
 		    		miss_pre_access_a = cache_dl1_adap[LRU_ADAP]->misses;
-			    	miss_pre_access_b = cache_dl1_adap[RAND_ADAP]->misses;
+			    	miss_pre_access_b = cache_dl1_adap[LFU_ADAP]->misses;
 
 				// Access the cache of policy A.
 			    	cache_access(cache_dl1_adap[LRU_ADAP], Read,
 					 	(rs->addr & ~3), NULL, 4,
 					 	sim_cycle, NULL, NULL);
 		 		// Access the cache of policy B. 
-			    	cache_access(cache_dl1_adap[RAND_ADAP], Read,
+			    	cache_access(cache_dl1_adap[LFU_ADAP], Read,
 					 	(rs->addr & ~3), NULL, 4,
 					 	sim_cycle, NULL, NULL);	
 					
@@ -3627,12 +3650,12 @@ ruu_issue(void)
 					dl1_local_ready[LRU_ADAP] = dl1_local_ready[LRU_ADAP] | 0x00000001;
 				}
 				// Update the local history ready buffer for policy B if needed.
-				if(dl1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+				if(dl1_local_ready[LFU_ADAP] != 0xFFFFFFFF)
 				{
 					// Shift the buffer because it's not full.
-					dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] << 1;
+					dl1_local_ready[LFU_ADAP] = dl1_local_ready[LFU_ADAP] << 1;
 					// Insert 1 to LSB, maintain the value. 
-					dl1_local_ready[RAND_ADAP] = dl1_local_ready[RAND_ADAP] | 0x00000001;
+					dl1_local_ready[LFU_ADAP] = dl1_local_ready[LFU_ADAP] | 0x00000001;
 				}				 
 			 	// Check if a miss has occurred for policy A.
 			 	// Update the local history buffer for policy A.
@@ -3650,21 +3673,21 @@ ruu_issue(void)
 			 	}					 
 			 	// Check if a miss has occurred for policy B.
 			 	// Update the local history buffer for policy B.
-			 	if(cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+			 	if(cache_dl1_adap[LFU_ADAP]->misses == miss_pre_access_b)
 			 	{
 			 		// This case means there was a hit. Shift a 0 to LSB.
-			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
+			 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] << 1;
 			 		
 			 	} else 
 			 	{
 			 		// This case means there was a miss. Shift a 1 to LSB.
-			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] << 1;
-			 		dl1_local_history[RAND_ADAP] = dl1_local_history[RAND_ADAP] | 0x00000001;
+			 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] << 1;
+			 		dl1_local_history[LFU_ADAP] = dl1_local_history[LFU_ADAP] | 0x00000001;
 			 				 	
 			 	}					 
 				
 				// Need to choose which policy the adaptive will use based on history buffers.
-				if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+				if((cache_dl1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_dl1_adap[LFU_ADAP]->misses == miss_pre_access_b))
 				{
 					// Since both policies hit just choose policy A. 
 					cache_dl1_adap[ADAP]->policy = LRU;
@@ -3681,9 +3704,9 @@ ruu_issue(void)
 				{	
 					// This case means there is a miss and voting must be done. 
 					// Implement prediction algorithm if ready buffers full.
-					if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+					if(dl1_global_ready == 0xFFFFFFFF && dl1_local_ready[LRU_ADAP] == 0xFFFFFFFF && dl1_local_ready[LFU_ADAP] == 0xFFFFFFFF) 
 					{
-						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[LFU_ADAP]))
 						{
 							if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
 							{
@@ -3742,7 +3765,7 @@ ruu_issue(void)
 					{
 						// This means the buffers are not full. 
 						// Compare the local histories. 
-						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[RAND_ADAP]))
+						if(count_buffer_zeros(dl1_local_history[LRU_ADAP]) >= count_buffer_zeros(dl1_local_history[LFU_ADAP]))
 						{
 							// Choose policy A. A <= B 
 							cache_dl1_adap[ADAP]->policy = LRU;
@@ -5284,14 +5307,14 @@ ruu_fetch(void)
 		    	
     	        // Check the misses for policy A and B before access.
     		miss_pre_access_a = cache_il1_adap[LRU_ADAP]->misses;
-	    	miss_pre_access_b = cache_il1_adap[RAND_ADAP]->misses;
+	    	miss_pre_access_b = cache_il1_adap[LFU_ADAP]->misses;
 
 		// Access the cache of policy A.
 		cache_access(cache_il1_adap[LRU_ADAP], Read, IACOMPRESS(fetch_regs_PC),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);			 	
  		// Access the cache of policy B. 
-		cache_access(cache_il1_adap[RAND_ADAP], Read, IACOMPRESS(fetch_regs_PC),
+		cache_access(cache_il1_adap[LFU_ADAP], Read, IACOMPRESS(fetch_regs_PC),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     NULL, NULL);	 		
 					
@@ -5304,12 +5327,12 @@ ruu_fetch(void)
 			il1_local_ready[LRU_ADAP] = il1_local_ready[LRU_ADAP] | 0x00000001;
 		}
 		// Update the local history ready buffer for policy B if needed.
-		if(il1_local_ready[RAND_ADAP] != 0xFFFFFFFF)
+		if(il1_local_ready[LFU_ADAP] != 0xFFFFFFFF)
                 {
                         // Shift the buffer because it's not full.
-                        il1_local_ready[RAND_ADAP] = il1_local_ready[RAND_ADAP] << 1;
+                        il1_local_ready[LFU_ADAP] = il1_local_ready[LFU_ADAP] << 1;
                         // Insert 1 to LSB, maintain the value. 
-                        il1_local_ready[RAND_ADAP] = il1_local_ready[RAND_ADAP] | 0x00000001;
+                        il1_local_ready[LFU_ADAP] = il1_local_ready[LFU_ADAP] | 0x00000001;
                 }				 
                 // Check if a miss has occurred for policy A.
                 // Update the local history buffer for policy A.
@@ -5327,21 +5350,21 @@ ruu_fetch(void)
                 }					 
                 // Check if a miss has occurred for policy B.
                 // Update the local history buffer for policy B.
-                if(cache_il1_adap[RAND_ADAP]->misses == miss_pre_access_b)
+                if(cache_il1_adap[LFU_ADAP]->misses == miss_pre_access_b)
                 {
                         // This case means there was a hit. Shift a 0 to LSB.
-                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] << 1;
+                        il1_local_history[LFU_ADAP] = il1_local_history[LFU_ADAP] << 1;
                         
                 } else 
                 {
                         // This case means there was a miss. Shift a 1 to LSB.
-                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] << 1;
-                        il1_local_history[RAND_ADAP] = il1_local_history[RAND_ADAP] | 0x00000001;
+                        il1_local_history[LFU_ADAP] = il1_local_history[LFU_ADAP] << 1;
+                        il1_local_history[LFU_ADAP] = il1_local_history[LFU_ADAP] | 0x00000001;
                                                 
                 }					 
                 
                 // Need to choose which policy the adaptive will use based on history buffers.
-                if((cache_il1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il1_adap[RAND_ADAP]->misses == miss_pre_access_b))
+                if((cache_il1_adap[LRU_ADAP]->misses == miss_pre_access_a) && (cache_il1_adap[LFU_ADAP]->misses == miss_pre_access_b))
                 {
                         // Since both policies hit just choose policy A. 
                         cache_il1_adap[ADAP]->policy = LRU;
@@ -5358,9 +5381,9 @@ ruu_fetch(void)
                 {	
                         // This case means there is a miss and voting must be done. 
                         // Implement prediction algorithm if ready buffers full.
-                        if(il1_global_ready == 0xFFFFFFFF && il1_local_ready[LRU_ADAP] == 0xFFFFFFFF && il1_local_ready[RAND_ADAP] == 0xFFFFFFFF) 
+                        if(il1_global_ready == 0xFFFFFFFF && il1_local_ready[LRU_ADAP] == 0xFFFFFFFF && il1_local_ready[LFU_ADAP] == 0xFFFFFFFF) 
                         {
-                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[RAND_ADAP]))
+                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[LFU_ADAP]))
                                 {
                                         if(count_buffer_zeros(il1_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                         {
@@ -5418,7 +5441,7 @@ ruu_fetch(void)
                         {
                                 // This means the buffers are not full. 
                                 // Compare the local histories. 
-                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[RAND_ADAP]))
+                                if(count_buffer_zeros(il1_local_history[LRU_ADAP]) >= count_buffer_zeros(il1_local_history[LFU_ADAP]))
                                 {
                                         // Choose policy A. A <= B 
                                         cache_il1_adap[ADAP]->policy = LRU;
