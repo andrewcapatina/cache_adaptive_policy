@@ -371,7 +371,7 @@ static enum { spec_ID, spec_WB, spec_CT } bpred_spec_update;
 #define MAX_CACHES_ADAP 3
 
 /* adaptive cache policies. */
-/* current implementation: LRU, random, adaptive. */
+/* current implementation: LRU, LFU, adaptive. */
 /* Policies: A, B, adaptive. Always keep adaptive. */
 enum cache_policy_adap{LRU_ADAP, LFU_ADAP, ADAP};
 /* Boolean states needed for program. */ 
@@ -634,7 +634,7 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
                                 if(count_buffer_zeros(dl2_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                 {
                                         // Choose policy B. 
-                                        cache_dl2_adap[ADAP]->policy = Random;
+                                        cache_dl2_adap[ADAP]->policy = LFU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         dl2_global_history = dl2_global_history << 1;
                                         // Insert a one into the LSB.
@@ -664,7 +664,7 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
                                 if(count_buffer_zeros(dl2_global_history) < 20) // If fraction of history is towards B, go with policy B.
                                 {
                                         // Choose policy B. 
-                                        cache_dl2_adap[ADAP]->policy = Random;
+                                        cache_dl2_adap[ADAP]->policy = LFU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         dl2_global_history = dl2_global_history << 1;
                                         // Insert a one into the LSB.
@@ -705,7 +705,7 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
                             } else 
                             {
                                     // Choose policy B. A <= B 
-                                    cache_dl2_adap[ADAP]->policy = Random;
+                                    cache_dl2_adap[ADAP]->policy = LFU;
                                     // Shift policy A bit into the global history register. It's zero. 
                                     dl2_global_history = dl2_global_history << 1;
                                     // Insert a one into the LSB.
@@ -873,7 +873,7 @@ if (cache_il2)
                                 if(count_buffer_zeros(il2_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                 {
                                         // Choose policy B. 
-                                        cache_il2_adap[ADAP]->policy = Random;
+                                        cache_il2_adap[ADAP]->policy = LFU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         il2_global_history = il2_global_history << 1;
                                         // Insert a one into the LSB.
@@ -899,7 +899,7 @@ if (cache_il2)
                                 if(count_buffer_zeros(il2_global_history) < 20) // If fraction of history is towards B, go with policy B.
                                 {
                                         // Choose policy B. 
-                                        cache_il2_adap[ADAP]->policy = Random;
+                                        cache_il2_adap[ADAP]->policy = LFU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         il2_global_history = il2_global_history << 1;
                                         // Insert a one into the LSB.
@@ -938,7 +938,7 @@ if (cache_il2)
                             } else 
                             {
                                     // Choose policy B. A <= B 
-                                    cache_il2_adap[ADAP]->policy = Random;
+                                    cache_il2_adap[ADAP]->policy = LFU;
                                     // Shift policy A bit into the global history register. It's zero. 
                                     il2_global_history = il2_global_history << 1;
                                     // Insert a one into the LSB.
@@ -1700,6 +1700,8 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
         
 
       } else {
+      	fprintf(stderr, "policy str: %c", c);
+      	fprintf(stderr, "policy num: %i", cache_char2policy(c));
         cache_il1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
 			       /* usize */0, assoc, cache_char2policy(c),
 			       il1_access_fn, /* hit latency */ cache_il1_lat);
@@ -2991,7 +2993,7 @@ ruu_commit(void)
 						if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
 						{
 							// Choose policy B. 
-							cache_dl1_adap[ADAP]->policy = Random;
+							cache_dl1_adap[ADAP]->policy = LFU;
 							// Shift policy A bit into the global history register. It's zero. 
 							dl1_global_history = dl1_global_history << 1;
 							// Insert a one into the LSB.
@@ -3016,7 +3018,7 @@ ruu_commit(void)
 						if(count_buffer_zeros(dl1_global_history) < 20) // If fraction of history is towards B, go with policy B.
 						{
 							// Choose policy B. 
-							cache_dl1_adap[ADAP]->policy = Random;
+							cache_dl1_adap[ADAP]->policy = LFU;
 							// Shift policy A bit into the global history register. It's zero. 
 							dl1_global_history = dl1_global_history << 1;
 							// Insert a one into the LSB.
@@ -3052,7 +3054,7 @@ ruu_commit(void)
 					} else 
 					{
 						// Choose policy B. A <= B 
-						cache_dl1_adap[ADAP]->policy = Random;
+						cache_dl1_adap[ADAP]->policy = LFU;
 						// Shift policy A bit into the global history register. It's zero. 
 						dl1_global_history = dl1_global_history << 1;
 						// Insert a one into the LSB.
@@ -3711,7 +3713,7 @@ ruu_issue(void)
 							if(count_buffer_zeros(dl1_global_history) < 12) // If fraction of history is towards B, go with policy B.
 							{
 								// Choose policy B. 
-								cache_dl1_adap[ADAP]->policy = Random;
+								cache_dl1_adap[ADAP]->policy = LFU;
 								// Shift policy A bit into the global history register. It's zero. 
 								dl1_global_history = dl1_global_history << 1;
 								// Insert a one into the LSB.
@@ -3737,7 +3739,7 @@ ruu_issue(void)
 							if(count_buffer_zeros(dl1_global_history) < 20) // If fraction of history is towards B, go with policy B.
 							{
 								// Choose policy B. 
-								cache_dl1_adap[ADAP]->policy = Random;
+								cache_dl1_adap[ADAP]->policy = LFU;
 								// Shift policy A bit into the global history register. It's zero. 
 								dl1_global_history = dl1_global_history << 1;
 								// Insert a one into the LSB.
@@ -3775,7 +3777,7 @@ ruu_issue(void)
 						} else 
 						{
 							// Choose policy B. A <= B 
-							cache_dl1_adap[ADAP]->policy = Random;
+							cache_dl1_adap[ADAP]->policy = LFU;
 							// Shift policy A bit into the global history register. It's zero. 
 							dl1_global_history = dl1_global_history << 1;
 							// Insert a one into the LSB.
@@ -5376,7 +5378,9 @@ ruu_fetch(void)
 			     		NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
 			     		NULL, NULL);
 	      		if (lat > cache_il1_lat)
-				last_inst_missed = TRUE;				
+				last_inst_missed = TRUE;			
+		
+			//fprintf(stderr, "case 1");
                 } else 
                 {	
                         // This case means there is a miss and voting must be done. 
@@ -5388,17 +5392,21 @@ ruu_fetch(void)
                                         if(count_buffer_zeros(il1_global_history) < 12) // If fraction of history is towards B, go with policy B.
                                         {
                                                 // Choose policy B. 
-                                                cache_il1_adap[ADAP]->policy = Random;
+                                                cache_il1_adap[ADAP]->policy = LFU;
                                                 // Shift policy A bit into the global history register. It's zero. 
                                                 il1_global_history = il1_global_history << 1;
                                                 // Insert a one into the LSB.
-                                                il1_global_history = il1_global_history | 0x00000001;			
+                                                il1_global_history = il1_global_history | 0x00000001;
+                                                //fprintf(stderr, "case 2");
+                                                			
                                         } else	// Policy A has lots of hits, use A instead.
                                         {
                                                 // Choose policy A.
                                                 cache_il1_adap[ADAP]->policy = LRU;
                                                 // Shift policy A bit into the global history register. It's zero. 
-                                                il1_global_history = il1_global_history << 1;							
+                                                il1_global_history = il1_global_history << 1;
+                                                
+                                                //fprintf(stderr, "case 3");							
                                         }
                                         // Access the adaptive cache. 
 	      				lat =
@@ -5413,17 +5421,22 @@ ruu_fetch(void)
                                         if(count_buffer_zeros(il1_global_history) < 20) // If fraction of history is towards B, go with policy B.
                                         {
                                                 // Choose policy B. 
-                                                cache_il1_adap[ADAP]->policy = Random;
+                                                cache_il1_adap[ADAP]->policy = LFU;
                                                 // Shift policy A bit into the global history register. It's zero. 
                                                 il1_global_history = il1_global_history << 1;
                                                 // Insert a one into the LSB.
-                                                il1_global_history = il1_global_history | 0x00000001;			
+                                                il1_global_history = il1_global_history | 0x00000001;	
+                                                
+                                                //fprintf(stderr, "case 4");
+                                                		
                                         } else	// Policy A has lots of hits, use A instead.
                                         {
                                                 // Choose policy A.
                                                 cache_il1_adap[ADAP]->policy = LRU;
                                                 // Shift policy A bit into the global history register. It's zero. 
                                                 il1_global_history = il1_global_history << 1;							
+                                                
+                                                //fprintf(stderr, "case 5");
                                         }
                                 
                                 
@@ -5447,15 +5460,19 @@ ruu_fetch(void)
                                         cache_il1_adap[ADAP]->policy = LRU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         il1_global_history = il1_global_history << 1;
+                                        
+                                        //fprintf(stderr, "case 6");
                                 
                                 } else 
                                 {
                                         // Choose policy B. A <= B 
-                                        cache_il1_adap[ADAP]->policy = Random;
+                                        cache_il1_adap[ADAP]->policy = LFU;
                                         // Shift policy A bit into the global history register. It's zero. 
                                         il1_global_history = il1_global_history << 1;
                                         // Insert a one into the LSB.
-                                        il1_global_history = il1_global_history | 0x00000001;					
+                                        il1_global_history = il1_global_history | 0x00000001;
+                                        
+                                        //fprintf(stderr, "case 7");					
                                 }
                                 // Update the global READY buffer.
                                 il1_global_ready = il1_global_ready << 1;
@@ -5475,9 +5492,6 @@ ruu_fetch(void)
                                               
               
               }	    
-
-
-        
 
 	  if (itlb)
 	    {

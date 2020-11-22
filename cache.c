@@ -349,6 +349,12 @@ cache_create(char *name,		/* name of the cache */
 			      (cp->balloc ? (bsize*sizeof(byte_t)) : 0));
   if (!cp->data)
     fatal("out of virtual memory");
+    
+  /* Initialize counters tracking policy usage for adaptive. */
+  for(int i = 0; i < NUM_POLICIES; ++i)
+  {
+  	cp->policy_count[i] = 0;  
+  }
 
   /* slice up the data blocks */
   for (bindex=0,i=0; i<nsets; i++)
@@ -377,6 +383,9 @@ cache_create(char *name,		/* name of the cache */
 	  blk = CACHE_BINDEX(cp, cp->data, bindex);
 	  bindex++;
 
+	// Initialize count for SCORE policy.
+	  blk->blk_score = 0;
+	// initialize count for LFU policy.
 	  blk->lfu_count = 0;
 	  /* invalidate new cache block */
 	  blk->status = 0;
@@ -412,6 +421,7 @@ cache_char2policy(char c)		/* replacement policy as a char */
   case 'f': return FIFO;
   case 'a': return Adaptive;
   case 'z': return LFU;
+  case 's': return SCORE;
   default: fatal("bogus replacement policy, `%c'", c);
   }
 }
@@ -432,6 +442,7 @@ cache_config(struct cache_t *cp,	/* cache instance */
 	  : cp->policy == FIFO ? "FIFO"
 	  : cp->policy == Adaptive ? "ADAPTIVE"
 	  : cp->policy == LFU ? "LFU"
+	  : cp->policy == SCORE ? "SCORE"
 	  : (abort(), ""));
 }
 
@@ -476,6 +487,18 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
   sprintf(buf, "%s.inv_rate", name);
   sprintf(buf1, "%s.invalidations / %s.accesses", name, name);
   stat_reg_formula(sdb, buf, "invalidation rate (i.e., invs/ref)", buf1, NULL);
+  
+  sprintf(buf, "%s.policy_count[0]", name);
+  stat_reg_counter(sdb,buf, "cache replacement policy 0 count:", &cp->policy_count[0], 0, NULL);
+  sprintf(buf, "%s.policy_count[1]", name);
+  stat_reg_counter(sdb,buf, "cache replacement policy 1 count:", &cp->policy_count[1], 0, NULL);
+  sprintf(buf, "%s.policy_count[2]", name);
+  stat_reg_counter(sdb,buf, "cache replacement policy 2 count:", &cp->policy_count[2], 0, NULL);    
+  sprintf(buf, "%s.policy_count[3]", name);
+  stat_reg_counter(sdb,buf, "cache replacement policy 3 count:", &cp->policy_count[3], 0, NULL);  
+  sprintf(buf, "%s.policy_count[4]", name);
+  stat_reg_counter(sdb,buf, "cache replacement policy 4 count:", &cp->policy_count[4], 0, NULL);  
+
 }
 
 /* print cache stats */
@@ -531,7 +554,13 @@ cache_access(struct cache_t *cp,	/* cache to access */
      ((addr + (nbytes - 1)) > ((addr & ~cp->blk_mask) + (cp->bsize - 1))) */
   if ((addr + nbytes) > ((addr & ~cp->blk_mask) + cp->bsize))
     fatal("cache: access error: access spans block, addr 0x%08x", addr);
+    
+  /* Increment policy tracker count. */
+  cp->policy_count[cp->policy] = cp->policy_count[cp->policy] + 1; 
 
+  struct cache_blk_t * set_tail;  	// Pointer to tail.
+  struct cache_blk_t * current_ptr;	// Current pointer used to traverse list.  
+  
   /* permissions are checked on cache misses */
 
   /* check for a fast hit: access to same block */
@@ -584,41 +613,15 @@ cache_access(struct cache_t *cp,	/* cache to access */
     {
       int bindex = myrand() & (cp->assoc - 1);
       repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
-      fprintf(stderr, "address replaced: %p\n", (void*)repl);
       break;
     }
   case LFU:
     {
-       //fprintf(stderr, "sim: 1\n");
        short flag = 0;		// Flag for setting a variable.
 	unsigned long lowest_count = 0;	// variable for containing lowest LFU count number.
-//	lowest_count = cp->sets[set].way_tail->lfu_count;
 
-/*
-       for(int i = 0; i < cp->assoc; ++i)	// Loop through each block within the set.
-       {
-       	struct cache_blk_t * block = CACHE_BINDEX(cp, cp->sets[set].blks, i);	// Get the cache block.
-       	//fprintf(stderr, "sim: 1\n");
-       	if(flag == 0)
-       	{
-       		lowest_count = block->lfu_count; // Store the first value found.
-       		flag = 1;
-       	}
-       	else 
-       	{
-       		if(lowest_count > block->lfu_count) // Looking for lowest count.
-       		{
-       			lowest_count = block->lfu_count;
-       		}
-       	}
-       	
-       	
-       }
-*/
-
-
-       struct cache_blk_t * set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
-       struct cache_blk_t * current_ptr = set_tail;			// Current pointer for loop below.
+       set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+       current_ptr = set_tail;			// Current pointer for loop below.
        while(current_ptr != NULL)
        {
        	if(flag == 0)
@@ -640,8 +643,6 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
        set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
        current_ptr = set_tail;			// Current pointer for loop below.
-       int flag2 = 0;
-       //fprintf(stderr, "sim: 2\n");
        while(current_ptr != NULL)
        {
 //       fprintf(stderr, "count: %lu \n", lowest_count);
@@ -649,12 +650,12 @@ cache_access(struct cache_t *cp,	/* cache to access */
 //       fprintf(stderr, "count: %lu \n", current_ptr->lfu_count);
        	if(current_ptr->lfu_count == lowest_count) // Search for the lowest count.
        	{
-//       	fprintf(stderr, "sim: 2\n");
        		//fprintf(stderr, "address replaced: %p\n", (void*)current_ptr);
        		//fprintf(stderr, "count: %lu \n", lowest_count);
        		repl = current_ptr;	// Set the replacement block.
 			
 	   		update_way_list(&cp->sets[set], repl, Head);
+	   		
        	}
        	current_ptr = current_ptr->way_prev; // Traverse the linked list. 
        
@@ -664,7 +665,58 @@ cache_access(struct cache_t *cp,	/* cache to access */
         
        break;
     }
-    
+  case SCORE: 
+  {
+  	int num_below_thresh = 0;	// Number of items below threshold.
+  	int array_loc[16] = {0};	// Holds location of elements below threshold.
+  	int index = 0;	// Tracks which index of set is below threshold.
+  	int k = 0;	// Used for array_loc variable.
+       set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+       current_ptr = set_tail;			// Current pointer for loop below.
+  	// Traverse the entire set. The purpose here is to collect data about the blocks. 
+  	while(current_ptr != NULL)
+  	{
+  		// check if the score is below threshold.
+  		if(current_ptr->blk_score < THRESHOLD)
+  		{
+  			num_below_thresh = num_below_thresh + 1;	// Increment count for number below thresh.
+  			array_loc[k] = index;		// Save the location that is below threshold. 
+  			k = k + 1;		
+  			
+  		}
+  		current_ptr = current_ptr->way_prev;	// Traverse the list.
+  		index = index + 1;	// Increment index tracker. 
+  	}
+
+//	fprintf(stderr, "below: %i", num_below_thresh);	
+  	// Check if any blocks were found under threshold. 
+  	//if(num_below_thresh > 0)cach
+  	if(num_below_thresh < 0)
+  	{
+  
+  		// We must randomly choose one of the items in the created list. 
+  		int ind = myrand() & (num_below_thresh - 1);
+  		int bindex = array_loc[ind];
+  		fprintf(stderr, "bindex 1: %i", bindex);
+  		repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
+//  	fprintf(stderr, "bindex 1: %i", bindex);
+//  	fprintf(stderr, "addr 1: %p \m", (void *) repl);
+  	}
+  	else
+  	{
+  
+  		// This means we can throw out any of the blocks. 
+		int bindex = myrand() & (cp->assoc - 1);
+		repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);    	
+  	//fprintf(stderr, "bindex 2: %i", bindex);
+//fprintf(stderr, "addr 2: %p \m", (void *) repl);
+  	}
+
+	if(!repl)
+         fatal("SCORE replacement policy failed. variables repl null.");       
+  	break;
+  	
+  }
   default:
     panic("bogus replacement policy");
   }
@@ -700,12 +752,15 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	  cp->writebacks++;
 	  lat += cp->blk_access_fn(Write,
 				   CACHE_MK_BADDR(cp, repl->tag, set),
-				   cp->bsize, repl, now+lat);
+				   cp->bsize, repl, now+lat);	   
+				   
 	}
-    }
+    }	
 
   // Reset the frequency counter. 
   repl->lfu_count = 0;
+  // Reset SCORE value. 
+  repl->blk_score = 0;
 
   /* update block tags */
   repl->tag = tag;
@@ -714,6 +769,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
   /* read data block */
   lat += cp->blk_access_fn(Read, CACHE_BADDR(cp, addr), cp->bsize,
 			   repl, now+lat);
+			   
 
   /* copy data out of cache block */
   if (cp->balloc)
@@ -741,7 +797,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
 
  cache_hit: /* slow hit handler */
-  
+ 
   /* **HIT** */
   cp->hits++;
 
@@ -756,12 +812,38 @@ cache_access(struct cache_t *cp,	/* cache to access */
     blk->status |= CACHE_BLK_DIRTY;
 
   /* if LRU replacement and this is not the first element of list, reorder */
-  if ((blk->way_prev && cp->policy == LRU) || (blk->way_prev && cp->policy == LFU) )
+  if ((blk->way_prev && cp->policy == LRU) || (blk->way_prev && cp->policy == LFU))
     {
       /* move this block to head of the way (MRU) list */
       update_way_list(&cp->sets[set], blk, Head);
     }
     
+      
+  set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+  current_ptr = set_tail;		// Current pointer for loop below.
+  // Loop over the set of cache blocks.
+  while(current_ptr != NULL)
+  {
+  	// Decrement score of missed cache blocks. 
+  	// Increment score of hit cache block. 
+       if(current_ptr != blk)
+       {
+       	current_ptr->blk_score = current_ptr->blk_score - DECREASE_VELOCITY; 
+       }else
+       {
+       	current_ptr->blk_score = current_ptr->blk_score + INCREASE_VELOCITY;
+       }
+
+  	// Reset the score if needed. 
+  	if(current_ptr->blk_score > MAX_COUNT)
+  		current_ptr->blk_score = MAX_COUNT;
+	else if(current_ptr->blk_score < 0)
+  		current_ptr->blk_score = 0;
+       // Traverse linked list. 
+       current_ptr = current_ptr->way_prev;
+       	
+  }
+   
     
   /* Update the LFU count of the block. */
   blk->lfu_count = blk->lfu_count + 1;
@@ -780,7 +862,31 @@ cache_access(struct cache_t *cp,	/* cache to access */
   return (int) MAX(cp->hit_latency, (blk->ready - now));
 
  cache_fast_hit: /* fast hit handler */
-  
+
+  set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+  current_ptr = set_tail;		// Current pointer for loop below.
+  // Loop over the set of cache blocks.
+  while(current_ptr != NULL)
+  {
+  	// Decrement score of missed cache blocks. 
+  	// Increment score of hit cache block. 
+       if(current_ptr != blk)
+       {
+       	current_ptr->blk_score = current_ptr->blk_score - DECREASE_VELOCITY; 
+       }else
+       {
+       	current_ptr->blk_score = current_ptr->blk_score + INCREASE_VELOCITY;
+       }
+  	// Reset the score if needed. 
+  	if(current_ptr->blk_score > MAX_COUNT)
+  		current_ptr->blk_score = MAX_COUNT;
+	else if(current_ptr->blk_score < 0)
+  		current_ptr->blk_score = 0;
+       // Traverse linked list. 
+       current_ptr = current_ptr->way_prev;
+       	
+  }
+   
   /* **FAST HIT** */
   cp->hits++;
 

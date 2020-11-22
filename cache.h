@@ -98,13 +98,26 @@
    speed block access, this macro decides if a cache is "highly associative" */
 #define CACHE_HIGHLY_ASSOC(cp)	((cp)->assoc > 4)
 
+/* Define the SCORE policy cache block attribute, used to decide the
+victim block, and how the SCORE of each block changes" */
+#define MAX_COUNT 100	/* 0-to-100 scale is easy to understand */
+#define DECREASE_VELOCITY 10
+#define INCREASE_VELOCITY 20
+#define THRESHOLD 50
+#define INIT_BLOCK_SCORE 30	/* after one access the threshold will be broken */
+
+// PLEASE NOTE: increase the size of this variable when a new policy added,
+// or else a segmentation fault will occur. 
+#define NUM_POLICIES 6
+
 /* cache replacement policy */
 enum cache_policy {
   LRU,		/* replace least recently used block (perfect LRU) */
   Random,	/* replace a random block */
   FIFO,	/* replace the oldest block in the set */
   Adaptive,	/* Choose between competing replacement policies. */
-  LFU		/* replace the least frequently used block. */
+  LFU,		/* replace the least frequently used block. */
+  SCORE        /* replace the block with the lowest score. */
 };
 
 /* block status values */
@@ -120,6 +133,7 @@ struct cache_blk_t
   struct cache_blk_t *hash_next;/* next block in the hash bucket chain, only
 				   used in highly-associative caches */
   unsigned long lfu_count;	/* Count for number of times block is used. */
+  unsigned long blk_score;	/* Score of the block for SCORE policy. */
   /* since hash table lists are typically small, there is no previous
      pointer, deletion requires a trip through the hash table bucket list */
   md_addr_t tag;		/* data block tag value */
@@ -159,6 +173,8 @@ struct cache_t
   int assoc;			/* cache associativity */
   enum cache_policy policy;	/* cache replacement policy */
   unsigned int hit_latency;	/* cache hit latency */
+  
+  counter_t policy_count[NUM_POLICIES];
 
   /* miss/replacement handler, read/write BSIZE bytes starting at BADDR
      from/into cache block BLK, returns the latency of the operation
