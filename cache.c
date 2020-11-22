@@ -645,13 +645,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
        current_ptr = set_tail;			// Current pointer for loop below.
        while(current_ptr != NULL)
        {
-//       fprintf(stderr, "count: %lu \n", lowest_count);
-//       fprintf(stderr, "sim: 1\n");
-//       fprintf(stderr, "count: %lu \n", current_ptr->lfu_count);
        	if(current_ptr->lfu_count == lowest_count) // Search for the lowest count.
        	{
-       		//fprintf(stderr, "address replaced: %p\n", (void*)current_ptr);
-       		//fprintf(stderr, "count: %lu \n", lowest_count);
        		repl = current_ptr;	// Set the replacement block.
 			
 	   		update_way_list(&cp->sets[set], repl, Head);
@@ -688,19 +683,13 @@ cache_access(struct cache_t *cp,	/* cache to access */
   		index = index + 1;	// Increment index tracker. 
   	}
 
-//	fprintf(stderr, "below: %i", num_below_thresh);	
-  	// Check if any blocks were found under threshold. 
-  	//if(num_below_thresh > 0)cach
-  	if(num_below_thresh < 0)
+  	if(num_below_thresh > 0)
   	{
   
   		// We must randomly choose one of the items in the created list. 
   		int ind = myrand() & (num_below_thresh - 1);
   		int bindex = array_loc[ind];
-  		fprintf(stderr, "bindex 1: %i", bindex);
   		repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
-//  	fprintf(stderr, "bindex 1: %i", bindex);
-//  	fprintf(stderr, "addr 1: %p \m", (void *) repl);
   	}
   	else
   	{
@@ -708,8 +697,6 @@ cache_access(struct cache_t *cp,	/* cache to access */
   		// This means we can throw out any of the blocks. 
 		int bindex = myrand() & (cp->assoc - 1);
 		repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);    	
-  	//fprintf(stderr, "bindex 2: %i", bindex);
-//fprintf(stderr, "addr 2: %p \m", (void *) repl);
   	}
 
 	if(!repl)
