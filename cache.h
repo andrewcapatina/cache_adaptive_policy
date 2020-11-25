@@ -98,13 +98,9 @@
    speed block access, this macro decides if a cache is "highly associative" */
 #define CACHE_HIGHLY_ASSOC(cp)	((cp)->assoc > 4)
 
-/* Define the SCORE policy cache block attribute, used to decide the
-victim block, and how the SCORE of each block changes" */
-#define MAX_COUNT 100	/* 0-to-100 scale is easy to understand */
-#define DECREASE_VELOCITY 10
-#define INCREASE_VELOCITY 20
-#define THRESHOLD 50
-#define INIT_BLOCK_SCORE 30	/* after one access the threshold will be broken */
+// Recommended to have the increase higher than decrease velocity. 
+#define DECREASE_VELOCITY 1
+#define INCREASE_VELOCITY 40
 
 // PLEASE NOTE: increase the size of this variable when a new policy added,
 // or else a segmentation fault will occur. 
@@ -174,7 +170,10 @@ struct cache_t
   enum cache_policy policy;	/* cache replacement policy */
   unsigned int hit_latency;	/* cache hit latency */
   
-  counter_t policy_count[NUM_POLICIES];
+  counter_t policy_count[NUM_POLICIES];	// Tracjs policy usage for the cache.
+  unsigned long init_score;			// The initial block score for SCORE policy.
+  unsigned long max_score;			// The max score for the SCORE policy.
+  unsigned long threshold;			// Threshold for SCORE policy.
 
   /* miss/replacement handler, read/write BSIZE bytes starting at BADDR
      from/into cache block BLK, returns the latency of the operation

@@ -355,6 +355,32 @@ cache_create(char *name,		/* name of the cache */
   {
   	cp->policy_count[i] = 0;  
   }
+  
+  // Inititalize the max score for SCORE policy. 
+  cp->max_score = (2^(cp->assoc)) - 1;
+  
+  // Set the inital score and threshold.
+  switch(cp->assoc) {  
+  case 1:
+  	cp->init_score = 0;
+  	cp->threshold = 1;
+  	break;
+  case 2:
+  	cp->init_score = 0;
+  	cp->threshold = 2;
+  	break;
+  case 4:
+  	cp->init_score = 0;
+  	cp->threshold = 9;
+  	break;
+  case 8: 
+  	cp->init_score = 0;
+  	cp->threshold = 130;
+  	break;
+// MAY NEED TO ADD MORE CASES HERE.  	
+  default:
+  	fatal("Bad associativity for SCORE policy.");
+}
 
   /* slice up the data blocks */
   for (bindex=0,i=0; i<nsets; i++)
@@ -384,7 +410,7 @@ cache_create(char *name,		/* name of the cache */
 	  bindex++;
 
 	// Initialize count for SCORE policy.
-	  blk->blk_score = 0;
+	  blk->blk_score = cp->init_score;
 	// initialize count for LFU policy.
 	  blk->lfu_count = 0;
 	  /* invalidate new cache block */
@@ -661,7 +687,9 @@ cache_access(struct cache_t *cp,	/* cache to access */
        break;
     }
   case SCORE: 
-  {
+  {	
+  	int lowest_score = 0;	// Lowest score for the entire set.
+	int flag = 0;		// Just used as an interlock.
   	int num_below_thresh = 0;	// Number of items below threshold.
   	int array_loc[16] = {0};	// Holds location of elements below threshold.
   	int index = 0;	// Tracks which index of set is below threshold.
@@ -671,16 +699,28 @@ cache_access(struct cache_t *cp,	/* cache to access */
   	// Traverse the entire set. The purpose here is to collect data about the blocks. 
   	while(current_ptr != NULL)
   	{
+  		if(flag == 0) {
+  			lowest_score = current_ptr->blk_score; // Set the initial low score.
+  			flag = 1;		// Set the interlock variable.
+  		} else if(flag == 1) {
+  		
+  			if(lowest_score > current_ptr->blk_score) {	// Update the lowest score if encountered.
+  				lowest_score = current_ptr->blk_score;
+  			}
+  		
+  		}
+  		
   		// check if the score is below threshold.
-  		if(current_ptr->blk_score < THRESHOLD)
+  		if(current_ptr->blk_score < cp->threshold)
   		{
   			num_below_thresh = num_below_thresh + 1;	// Increment count for number below thresh.
-  			array_loc[k] = index;		// Save the location that is below threshold. 
+  			array_loc[k] = index;				// Save the location that is below threshold. 
   			k = k + 1;		
   			
   		}
   		current_ptr = current_ptr->way_prev;	// Traverse the list.
   		index = index + 1;	// Increment index tracker. 
+  		
   	}
 
   	if(num_below_thresh > 0)
@@ -693,10 +733,18 @@ cache_access(struct cache_t *cp,	/* cache to access */
   	}
   	else
   	{
-  
-  		// This means we can throw out any of the blocks. 
-		int bindex = myrand() & (cp->assoc - 1);
-		repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);    	
+	       set_tail = cp->sets[set].way_tail;  	// Pointer to tail.
+	       current_ptr = set_tail;			// Current pointer for loop below.  	
+  		while(current_ptr != NULL)	// Traverse the set.
+  		{
+	  		if(current_ptr->blk_score == lowest_score) // When the lowest score is found select the block.
+	  		{
+	  			repl = current_ptr;
+	  			break;
+	  		}
+	  		
+	  		current_ptr = current_ptr->way_prev; 
+		}
   	}
 
 	if(!repl)
@@ -740,14 +788,14 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	  lat += cp->blk_access_fn(Write,
 				   CACHE_MK_BADDR(cp, repl->tag, set),
 				   cp->bsize, repl, now+lat);	   
-				   
+
 	}
     }	
 
   // Reset the frequency counter. 
   repl->lfu_count = 0;
   // Reset SCORE value. 
-  repl->blk_score = 0;
+  repl->blk_score = cp->init_score;
 
   /* update block tags */
   repl->tag = tag;
@@ -822,8 +870,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
        }
 
   	// Reset the score if needed. 
-  	if(current_ptr->blk_score > MAX_COUNT)
-  		current_ptr->blk_score = MAX_COUNT;
+  	if(current_ptr->blk_score > cp->max_score)
+  		current_ptr->blk_score = cp->max_score;
 	else if(current_ptr->blk_score < 0)
   		current_ptr->blk_score = 0;
        // Traverse linked list. 
@@ -865,8 +913,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
        	current_ptr->blk_score = current_ptr->blk_score + INCREASE_VELOCITY;
        }
   	// Reset the score if needed. 
-  	if(current_ptr->blk_score > MAX_COUNT)
-  		current_ptr->blk_score = MAX_COUNT;
+  	if(current_ptr->blk_score > cp->max_score)
+  		current_ptr->blk_score = cp->max_score;
 	else if(current_ptr->blk_score < 0)
   		current_ptr->blk_score = 0;
        // Traverse linked list. 
